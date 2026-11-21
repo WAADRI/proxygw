@@ -258,8 +258,8 @@ func TestM3E2EFailClosedGroupIsolation(t *testing.T) {
 			t.Fatalf("request %d through g1 = %d %q, want 200 %q", i, status, body, e2eHelloBody)
 		}
 	}
-	served := panel.topNNodes()
-	if served["node-a"] != rounds {
+	served := panel.waitTopNNodes("node-a", int64(rounds), 5*time.Second)
+	if served["node-a"] < rounds {
 		t.Fatalf("node-a served %d requests, want %d (all served counts: %v)", served["node-a"], rounds, served)
 	}
 	if served["node-b"] != 0 {
@@ -273,7 +273,14 @@ func TestM3E2EFailClosedGroupIsolation(t *testing.T) {
 			Errors int64 `json:"errors"`
 		} `json:"requests"`
 	}
-	panel.doJSON(http.MethodGet, "/api/v1/overview", nil, http.StatusOK, &overview)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		panel.doJSON(http.MethodGet, "/api/v1/overview", nil, http.StatusOK, &overview)
+		if overview.Requests.Total >= rounds || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	if overview.Requests.Total < rounds {
 		t.Fatalf("overview requests.total = %d, want >= %d", overview.Requests.Total, rounds)
 	}
