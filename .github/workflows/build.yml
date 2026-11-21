@@ -68,7 +68,7 @@ jobs:
         run: |
           NAME="node-proxy_${{ steps.vars.outputs.version }}_${{ matrix.os }}_${{ matrix.arch }}"
           mkdir -p "release/${NAME}"
-          cp dist/proxygw-server dist/proxygw-client README.md config.server.example.yaml config.client.example.yaml "release/${NAME}/"
+          cp dist/proxygw-server dist/proxygw-client README.md LICENSE config.server.example.yaml config.client.example.yaml "release/${NAME}/"
           if [ "${{ matrix.os }}" = "windows" ]; then
             mv "release/${NAME}/proxygw-server" "release/${NAME}/proxygw-server.exe"
             mv "release/${NAME}/proxygw-client" "release/${NAME}/proxygw-client.exe"
