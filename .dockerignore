@@ -1,0 +1,9 @@
+bin/
+dist/
+.git/
+.idea/
+.vscode/
+state/
+*.log
+coverage.txt
+*.tar.gz

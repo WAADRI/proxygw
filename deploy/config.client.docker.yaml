@@ -1,0 +1,46 @@
+# proxygw 节点侧 Docker 默认配置（设计为「环境变量优先」）
+#
+# 镜像内置本文件作为 /etc/proxygw/config.client.yaml，默认 CMD 直接读取它；
+# 所有关键参数都通过环境变量覆盖（环境变量 > 本文件 > 内置默认值）：
+#   SERVER_URL AUTH_TOKEN CLIENT_ID ALIAS TAGS REGION ISP_LABEL
+#   TRANSPORT PLANES COMPRESSION WEIGHT QUIC_FALLBACK
+#   STATE_DIR LOG_LEVEL LOG_FORMAT
+#   TLS_MODE TLS_PIN TLS_PINS TLS_CA_FILE TLS_SERVER_NAME TLS_CERT_FILE TLS_KEY_FILE
+#   EGRESS_IP EGRESS_IP6
+#
+# 因此一般不需要自己写配置文件；若需要完全自定义，可把文件挂载到
+# /etc/proxygw/config.client.yaml（会覆盖镜像内置文件）。
+#
+# 本示例面向「服务端使用公共 CA 证书」的场景，故 TLS 默认 ca；
+# 若服务端使用 pin 模式，启动容器时设置 TLS_MODE=pin 与 TLS_PIN=sha256/...
+
+server_url: "https://gw.example.com:443"
+token: ""
+client_id: ""
+alias: ""
+tags: []
+region: ""
+isp_label: ""
+weight: 100
+transport: auto
+quic_fallback: 2s
+planes: 2
+compression: true
+state_dir: /var/lib/proxygw/state
+
+log:
+  level: info
+  format: json
+
+tls:
+  mode: ca
+  pin: ""
+  pins: []
+  ca_file: ""
+  server_name: ""
+  trust_on_first_use: false
+  cert_file: ""
+  key_file: ""
+
+security:
+  allow_insecure_defaults: false

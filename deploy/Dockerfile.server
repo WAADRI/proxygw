@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+# proxygw 服务端镜像：多阶段构建，最终镜像只包含二进制与 CA 证书，以非 root 运行。
+FROM golang:1.24-alpine AS build
+WORKDIR /src
+
+# 国内构建可覆盖：--build-arg GOPROXY=https://goproxy.cn,direct
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY} CGO_ENABLED=0 GOOS=linux
+
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+ARG VERSION=dev
+ARG COMMIT=none
+ARG BUILD_TIME=unknown
+RUN go build -trimpath -ldflags "-s -w \
+    -X proxygw/internal/version.Version=${VERSION} \
+    -X proxygw/internal/version.Commit=${COMMIT} \
+    -X proxygw/internal/version.BuildTime=${BUILD_TIME}" \
+    -o /out/proxygw-server ./cmd/proxygw-server
+
+FROM alpine:3.20
+# libcap 用于给二进制授予绑定 443 的能力（容器内以非 root 运行）
+RUN apk add --no-cache ca-certificates tzdata libcap \
+ && addgroup -S proxygw && adduser -S -G proxygw -h /var/lib/proxygw proxygw \
+ && mkdir -p /etc/proxygw /var/lib/proxygw/state \
+ && chown -R proxygw:proxygw /var/lib/proxygw
+COPY --from=build /out/proxygw-server /usr/local/bin/proxygw-server
+RUN setcap cap_net_bind_service=+ep /usr/local/bin/proxygw-server
+COPY config.server.example.yaml /etc/proxygw/config.server.example.yaml
+USER proxygw
+WORKDIR /var/lib/proxygw
+# TCP 443：面板 HTTPS + wss 隧道；UDP 443：QUIC 隧道；8080：HTTP 代理；1080：SOCKS5
+EXPOSE 443/tcp 443/udp 8080/tcp 1080/tcp
+VOLUME ["/var/lib/proxygw"]
+ENTRYPOINT ["/usr/local/bin/proxygw-server"]
+CMD ["-config", "/etc/proxygw/config.server.yaml"]

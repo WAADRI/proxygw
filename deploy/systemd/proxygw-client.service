@@ -1,0 +1,25 @@
+[Unit]
+Description=proxygw node agent (client)
+Documentation=https://example.invalid/proxygw
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxygw
+Group=proxygw
+WorkingDirectory=/var/lib/proxygw
+ExecStart=/usr/local/bin/proxygw-client -config /etc/proxygw/config.client.yaml
+Restart=always
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/proxygw
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

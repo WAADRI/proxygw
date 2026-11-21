@@ -1,0 +1,55 @@
+# proxygw 服务端 docker-compose 示例
+# 所有参数通过环境变量注入；敏感值请写入 .env 或使用 docker secret。
+services:
+  proxygw-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.server
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-none}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    image: proxygw-server:${VERSION:-dev}
+    container_name: proxygw-server
+    restart: unless-stopped
+    ports:
+      - "${SERVER_LISTEN_PORT:-443}:443/tcp"
+      - "${SERVER_LISTEN_PORT:-443}:443/udp"
+      - "${HTTP_PROXY_PORT:-8080}:8080/tcp"
+      - "${SOCKS5_PORT:-1080}:1080/tcp"
+    environment:
+      # 环境变量优先级最高，覆盖 config.server.yaml
+      NP_STATE_DIR: /var/lib/proxygw/state
+      NP_SERVER_LISTEN_ADDR: ":443"
+      NP_SERVER_PUBLIC_URL: ${PUBLIC_URL:-}
+      NP_PROXY_HTTP_LISTEN: ":8080"
+      NP_PROXY_SOCKS5_LISTEN: ":1080"
+      NP_PROXY_AUTH_MODE: ${AUTH_MODE:-required}
+      NP_TLS_MODE: ${TLS_MODE:-pin}
+      NP_TLS_CERT_FILE: ${TLS_CERT_FILE:-}
+      NP_TLS_KEY_FILE: ${TLS_KEY_FILE:-}
+      NP_TLS_CA_FILE: ${TLS_CA_FILE:-}
+      NP_TLS_CLIENT_AUTH: ${TLS_CLIENT_AUTH:-none}
+      NP_NODES_MTLS: ${NODES_MTLS:-false}
+      NP_ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      NP_ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH:-}
+      NP_LOG_LEVEL: ${LOG_LEVEL:-info}
+      NP_LOG_FORMAT: json
+      NP_SECURITY_ALLOW_INSECURE_DEFAULTS: ${ALLOW_INSECURE_DEFAULTS:-false}
+    volumes:
+      - proxygw-server-state:/var/lib/proxygw/state
+      - ./config.server.yaml:/etc/proxygw/config.server.yaml:ro
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/proxygw-server", "-version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # QUIC 需要较大 UDP 缓冲；生产按需调整。
+    sysctls:
+      net.core.rmem_max: "2500000"
+      net.core.wmem_max: "2500000"
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  proxygw-server-state:

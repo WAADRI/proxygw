@@ -1,0 +1,68 @@
+# proxygw 节点客户端配置示例
+#
+# 优先级：环境变量 > 本文件 > 内置默认值。
+# 节点主动外连服务端，无需公网 IP、无需开放任何入站端口。
+# 心跳/握手/并发等行为参数固定内置，不开放配置；写了会被忽略并在 stderr 告警。
+
+# 服务端地址：https://域名[:端口] 或 wss://域名[:端口][/path]；裸 host[:port] 默认 443。
+# 同一端口 UDP 走 QUIC、TCP 走 wss，无需分别配置。
+server_url: "https://gw.example.com:443"
+
+# 节点接入令牌：服务端控制台打印或面板签发/吊销。启用 mTLS 时可留空。
+# 下面为占位值，必须替换成真实令牌（服务端会拒绝不匹配的令牌）。
+token: "replace-with-32-byte-random-token"
+
+# 节点 ID：留空则首次启动自动生成并持久化到状态目录，重启后保持稳定。
+# 自定义时 1-64 字符 [A-Za-z0-9_.:-]。
+client_id: ""
+
+alias: ""                 # 面板显示名
+tags: []                  # 标签（小写去重），例如 ["us-residential", "comcast"]
+region: ""                # 手工地区标签，优先于自动识别结果
+isp_label: ""             # 手工 ISP 标签，优先于自动识别结果
+weight: 100               # 调度权重（weighted 策略使用）
+transport: auto           # auto(QUIC 优先，2s 超时回退 wss) | quic | ws
+quic_fallback: 2s         # QUIC 握手回退阈值，1-5s（弱网可调大）
+planes: 2                 # 传输连接条数（1-8），多平面提升吞吐与容错
+compression: true         # 是否向服务端声明支持 zstd 压缩
+state_dir: ./state        # 节点 ID、TOFU pin 等状态文件目录
+
+log:
+  level: info
+  format: json
+
+tls:
+  mode: pin               # pin(默认，校验 SPKI 指纹) | ca(系统根或 CA 文件) | insecure(仅开发)
+  # 服务端首次启动会打印 sha256/... 形式的 SPKI 指纹，替换下面这枚占位指纹。
+  pin: "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  # 密钥轮换窗口：可同时配置当前与下一枚 pin，服务端换密钥期间节点无需改动。
+  pins: []
+  ca_file: ""             # ca 模式下可指定私有 CA 文件；留空用系统根证书
+  server_name: ""         # 覆盖 SNI/证书校验名（服务端证书 SAN 与连接地址不一致时使用）
+  trust_on_first_use: false # 首次连接记录指纹（显式开启会打印告警；生产建议显式下发 pin）
+  cert_file: ""           # 可选：mTLS 客户端证书（与服务端 nodes.mtls 配套）
+  key_file: ""
+  dir: ""                 # TOFU pin 持久化目录，默认 <state_dir>/certs
+
+egress:
+  manual_v4: ""           # 手工指定出口 IPv4（覆盖自动探测）
+  manual_v6: ""           # 手工指定出口 IPv6
+  echo_urls_v4:           # 出口 IP 回声端点（纯文本 IP 或 JSON 带 ip 字段）
+    - https://api.ipify.org
+    - https://icanhazip.com
+    - https://cloudflare.com/cdn-cgi/trace
+  echo_urls_v6:
+    - https://api64.ipify.org
+    - https://icanhazip.com
+    - https://cloudflare.com/cdn-cgi/trace
+
+security:
+  # 仅本地开发可设为 true：允许弱令牌/关闭证书校验。生产必须 false。
+  allow_insecure_defaults: false
+
+# ---------------------------------------------------------------------------
+# 以下键固定内置、不允许配置（写入会被忽略并在 stderr 告警）：
+#   heartbeat / heartbeat_interval / handshake_timeout / hello_timeout / dial_timeout /
+#   timeouts / concurrency / max_concurrent / reconnect_interval / backoff / keepalive
+# 原因：避免不同节点行为漂移导致隧道状态机与超时语义不一致。
+# ---------------------------------------------------------------------------

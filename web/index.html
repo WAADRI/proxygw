@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="noindex, nofollow">
+<title>proxygw 管理面板</title>
+<!-- 无外部字体/图标/CDN；CSP script-src 'self'，因此本文件不含任何内联脚本与内联事件处理器。 -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+<div id="boot-screen" class="boot-screen" aria-live="polite">
+  <div class="boot-card">
+    <div class="brand-mark brand-mark-lg">pg</div>
+    <h1>proxygw</h1>
+    <div class="spinner" role="status" aria-label="加载中"></div>
+    <p class="muted">正在检查登录状态…</p>
+  </div>
+</div>
+
+<section id="login-view" class="login-view" hidden>
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-mark brand-mark-lg">pg</div>
+      <div>
+        <h1>proxygw</h1>
+        <p class="muted">多节点代理聚合网关 · 管理面板</p>
+      </div>
+    </div>
+    <form id="login-form" class="login-form" novalidate>
+      <div class="form-field">
+        <label for="login-username">用户名</label>
+        <input id="login-username" name="username" type="text" autocomplete="username" spellcheck="false" required autofocus>
+      </div>
+      <div class="form-field">
+        <label for="login-password">密码</label>
+        <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <div class="form-field">
+        <label for="login-totp">TOTP 验证码 <span class="muted">（启用二次验证时填写）</span></label>
+        <input id="login-totp" name="totp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6 位数字" spellcheck="false">
+      </div>
+      <div id="login-error" class="form-alert" role="alert" hidden></div>
+      <button id="login-submit" type="submit" class="btn btn-primary btn-block">登录</button>
+    </form>
+    <p class="login-foot muted">仅限授权管理员访问。首次启动的管理员密码见服务端控制台输出。</p>
+  </div>
+</section>
+
+<div id="app-view" hidden>
+  <header class="topbar">
+    <div class="topbar-left">
+      <button type="button" class="nav-toggle" data-action="toggle-nav" aria-label="切换导航" aria-controls="main-nav" aria-expanded="false">
+        <span class="nav-toggle-bar"></span><span class="nav-toggle-bar"></span><span class="nav-toggle-bar"></span>
+      </button>
+      <div class="brand">
+        <span class="brand-mark">pg</span>
+        <span class="brand-name">proxygw</span>
+      </div>
+      <nav id="main-nav" class="main-nav" aria-label="主导航">
+        <button type="button" class="nav-item" data-action="nav" data-page="overview">总览</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="nodes">节点</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="groups">节点组</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="credentials">凭据</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="rules">连接与规则</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="settings">运行设置</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="audit">审计</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="cert">证书</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="geo">归属地</button>
+        <button type="button" class="nav-item" data-action="nav" data-page="access">接入</button>
+      </nav>
+    </div>
+    <div class="topbar-right">
+      <span id="live-status" class="chip chip-live" hidden title="实时数据通道状态"></span>
+      <span id="clock-skew" class="chip chip-warn" hidden></span>
+      <span id="admin-name" class="admin-name" title="当前管理员"></span>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="refresh-page" title="刷新当前页面数据">刷新</button>
+      <button type="button" class="btn btn-ghost btn-sm" data-action="logout">退出</button>
+    </div>
+  </header>
+
+  <div id="global-banner" class="global-banner" role="alert" hidden>
+    <span id="global-banner-text" class="global-banner-text"></span>
+    <button type="button" class="btn btn-sm btn-ghost" data-action="banner-retry">重试</button>
+  </div>
+
+  <main id="main" class="main" tabindex="-1">
+
+    <!-- ============================== 总览 ============================== -->
+    <section class="page" id="page-overview" data-page="overview" hidden>
+      <header class="page-head">
+        <div>
+          <h2>总览</h2>
+          <p class="page-sub">在线节点、独立出口、活跃连接与 15 分钟趋势</p>
+        </div>
+        <div class="page-actions">
+          <span id="overview-updated" class="muted small"></span>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="refresh-page">立即刷新</button>
+        </div>
+      </header>
+
+      <div class="metric-grid">
+        <article class="metric-card">
+          <div class="metric-label">在线节点数</div>
+          <div class="metric-value" id="metric-online-nodes">—</div>
+          <div class="metric-sub" id="metric-online-sub">共 — 个节点</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">独立出口 IP 数</div>
+          <div class="metric-value" id="metric-unique-ips">—</div>
+          <div class="metric-sub" id="metric-unique-sub">按节点出口 IP 去重</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">活跃连接数</div>
+          <div class="metric-value" id="metric-active-conns">—</div>
+          <div class="metric-sub" id="metric-active-sub">当前在途请求 / 流</div>
+        </article>
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card"><span class="stat-label">累计请求</span><strong id="stat-requests">—</strong></div>
+        <div class="stat-card"><span class="stat-label">错误</span><strong id="stat-errors" class="text-red">—</strong></div>
+        <div class="stat-card"><span class="stat-label">透明重试</span><strong id="stat-retries">—</strong></div>
+        <div class="stat-card"><span class="stat-label">限流触发</span><strong id="stat-rate-limited" class="text-amber">—</strong></div>
+        <div class="stat-card"><span class="stat-label">熔断触发</span><strong id="stat-breaker-trips" class="text-red">—</strong></div>
+      </div>
+
+      <div class="card-grid">
+        <article class="card span-2">
+          <div class="card-head">
+            <h3>吞吐趋势（最近 15 分钟）</h3>
+            <span class="muted small">requests / errors / active</span>
+          </div>
+          <div id="overview-sparkline-legend" class="legend"></div>
+          <div id="overview-sparkline" class="sparkline-wrap"></div>
+          <p id="overview-trend-note" class="muted small"></p>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><h3>传输方式占比</h3></div>
+          <div id="overview-transport" class="transport-mix"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h3>证书状态</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="nav" data-page="cert">查看证书</button>
+          </div>
+          <div id="overview-cert"></div>
+        </article>
+
+        <article class="card span-2">
+          <div class="card-head">
+            <h3>隧道会话</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="nav" data-page="nodes">查看节点</button>
+          </div>
+          <div id="overview-tunnels" class="mini-table-wrap"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><h3>TopN 目标（15 分钟）</h3></div>
+          <div id="overview-topn" class="mini-table-wrap"></div>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h3>运行设置</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="nav" data-page="settings">修改</button>
+          </div>
+          <div id="overview-settings"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============================== 节点 ============================== -->
+    <section class="page" id="page-nodes" data-page="nodes" hidden>
+      <header class="page-head">
+        <div>
+          <h2>节点</h2>
+          <p class="page-sub">节点状态、出口 IP、归属地、负载与拨测</p>
+        </div>
+        <div class="page-actions">
+          <span id="nodes-live-hint" class="muted small">页面可见时每 3 秒自动刷新</span>
+        </div>
+      </header>
+
+      <form id="nodes-filters" class="filter-bar" novalidate>
+        <div class="filter-item filter-grow">
+          <label for="nodes-q">搜索</label>
+          <input id="nodes-q" type="search" placeholder="别名 / 节点 ID / 出口 IP" spellcheck="false">
+        </div>
+        <div class="filter-item">
+          <label for="nodes-country">国家</label>
+          <input id="nodes-country" list="nodes-country-list" placeholder="如 US / JP" spellcheck="false">
+          <datalist id="nodes-country-list"></datalist>
+        </div>
+        <div class="filter-item">
+          <label for="nodes-asn">ASN</label>
+          <input id="nodes-asn" inputmode="numeric" placeholder="如 15169" spellcheck="false">
+        </div>
+        <div class="filter-item">
+          <label for="nodes-group">节点组</label>
+          <select id="nodes-group"><option value="">全部组</option></select>
+        </div>
+        <div class="filter-item filter-checks">
+          <label class="check-label"><input type="checkbox" id="nodes-online">仅在线</label>
+          <label class="check-label"><input type="checkbox" id="nodes-unique">仅独立出口</label>
+        </div>
+        <div class="filter-actions">
+          <button type="submit" class="btn btn-primary">筛选</button>
+          <button type="reset" class="btn btn-ghost">重置</button>
+          <button type="button" class="btn btn-ghost" data-action="nodes-refresh">刷新</button>
+        </div>
+      </form>
+
+      <div id="nodes-summary" class="summary-bar"></div>
+
+      <div class="table-wrap">
+        <table class="data-table" id="nodes-table">
+          <thead>
+            <tr>
+              <th class="col-name">别名 / ID</th>
+              <th>组</th>
+              <th>出口 IP</th>
+              <th>国家</th>
+              <th>城市</th>
+              <th>ASN</th>
+              <th>ISP</th>
+              <th class="col-num">权重</th>
+              <th class="col-num">在途</th>
+              <th class="col-num">延迟</th>
+              <th class="col-num">累计流量</th>
+              <th>熔断</th>
+              <th>版本</th>
+              <th>传输</th>
+              <th>在线</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="nodes-tbody"></tbody>
+        </table>
+      </div>
+      <div class="table-footer">
+        <span id="nodes-total" class="muted"></span>
+        <div class="pager">
+          <button type="button" class="btn btn-ghost btn-sm" data-action="nodes-prev">上一页</button>
+          <span id="nodes-page-info" class="muted">第 1 页</span>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="nodes-next">下一页</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== 节点组 ============================== -->
+    <section class="page" id="page-groups" data-page="groups" hidden>
+      <header class="page-head">
+        <div>
+          <h2>节点组</h2>
+          <p class="page-sub">成员 =（选择器匹配 ∪ 显式加入）− 显式排除；空选择器不匹配任何节点</p>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="btn btn-primary" data-action="groups-new">新建节点组</button>
+        </div>
+      </header>
+      <div id="groups-grid" class="card-grid"></div>
+      <div id="groups-empty" class="empty-state" hidden>还没有节点组，点击右上角「新建节点组」创建。</div>
+    </section>
+
+    <!-- ============================== 凭据 ============================== -->
+    <section class="page" id="page-credentials" data-page="credentials" hidden>
+      <header class="page-head">
+        <div>
+          <h2>凭据</h2>
+          <p class="page-sub">代理账号、节点组授权、并发/带宽/协议/来源限制</p>
+        </div>
+        <div class="page-actions">
+          <span id="credentials-count" class="muted small"></span>
+          <button type="button" class="btn btn-primary" data-action="credentials-new">新建凭据</button>
+        </div>
+      </header>
+      <p class="notice">未绑定任何节点组的凭据默认可见全部节点；绑定组但组内无可用节点时按 fail-closed 返回 503。密码只在创建/重置时展示一次。</p>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="col-name">用户名</th>
+              <th>节点组</th>
+              <th>启用</th>
+              <th>过期时间</th>
+              <th>最近使用</th>
+              <th>用量</th>
+              <th class="col-num">并发上限</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="credentials-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================== 连接与规则 ============================== -->
+    <section class="page" id="page-rules" data-page="rules" hidden>
+      <header class="page-head">
+        <div>
+          <h2>连接与规则</h2>
+          <p class="page-sub">路由/粘性/熔断/限流热设置、粘性黑名单、ACL 与强制默认拒绝</p>
+        </div>
+      </header>
+
+      <article class="card">
+        <div class="card-head">
+          <h3>路由与运行时设置</h3>
+          <span class="muted small" id="rules-settings-version"></span>
+        </div>
+        <p class="muted small">修改保存后立即热生效并持久化；非法值会被服务端拒绝且保留旧值。</p>
+        <form id="rules-settings-form" class="settings-form" novalidate></form>
+        <div class="form-actions form-actions-bar">
+          <button type="button" class="btn btn-primary" data-action="settings-save" data-scope="rules">保存设置</button>
+          <button type="button" class="btn btn-ghost" data-action="settings-undo" data-scope="rules">撤销上次修改</button>
+          <button type="button" class="btn btn-danger-ghost" data-action="settings-reset" data-scope="rules">恢复默认</button>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h3>粘性黑名单</h3>
+          <button type="button" class="btn btn-primary btn-sm" data-action="sticky-new">新建规则</button>
+        </div>
+        <p class="muted small">目标维度（CIDR / 域名）或节点维度（节点组 / 节点 ID）任一命中即生效，优先级高于会话粘性。</p>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>启用</th>
+                <th class="col-name">备注</th>
+                <th>目标 CIDR</th>
+                <th>目标域名</th>
+                <th>节点组</th>
+                <th>节点 ID</th>
+                <th>更新时间</th>
+                <th class="col-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody id="sticky-tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="sub-card">
+          <div class="card-head"><h4>试算命中</h4></div>
+          <form id="sticky-preview-form" class="inline-form" novalidate>
+            <div class="form-field">
+              <label for="sticky-preview-host">目标域名</label>
+              <input id="sticky-preview-host" type="text" placeholder="如 bank.example.com" spellcheck="false">
+            </div>
+            <div class="form-field">
+              <label for="sticky-preview-ip">目标 IP</label>
+              <input id="sticky-preview-ip" type="text" placeholder="如 1.2.3.4" spellcheck="false">
+            </div>
+            <div class="form-field">
+              <label for="sticky-preview-port">端口</label>
+              <input id="sticky-preview-port" type="number" min="0" max="65535" placeholder="443">
+            </div>
+            <div class="form-field">
+              <label for="sticky-preview-node">节点 ID</label>
+              <input id="sticky-preview-node" type="text" placeholder="可选" spellcheck="false">
+            </div>
+            <div class="form-field">
+              <label for="sticky-preview-groups">节点组 ID</label>
+              <input id="sticky-preview-groups" type="text" placeholder="多个用逗号分隔（可选）" spellcheck="false">
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">试算</button>
+            </div>
+          </form>
+          <div id="sticky-preview-result" class="preview-result" hidden></div>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h3>访问控制（ACL）</h3>
+          <button type="button" class="btn btn-primary btn-sm" data-action="acl-new">新建 ACL 规则</button>
+        </div>
+        <p class="muted small">按 order 从小到大匹配，首条命中生效；默认动作见下方运行设置。</p>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="col-num">Order</th>
+                <th>来源 CIDR</th>
+                <th>目标域名</th>
+                <th>端口</th>
+                <th>协议</th>
+                <th>动作</th>
+                <th class="col-name">备注</th>
+                <th class="col-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody id="acl-tbody"></tbody>
+          </table>
+        </div>
+        <div id="acl-summary" class="summary-bar"></div>
+      </article>
+
+      <details class="card collapsible">
+        <summary>强制默认拒绝清单（只读，不可关闭，仅可追加规则）</summary>
+        <div id="acl-forced" class="forced-list"></div>
+      </details>
+    </section>
+
+    <!-- ============================== 运行设置 ============================== -->
+    <section class="page" id="page-settings" data-page="settings" hidden>
+      <header class="page-head">
+        <div>
+          <h2>运行设置</h2>
+          <p class="page-sub">热生效并持久化到 runtime-overrides.json，重启后覆盖配置文件</p>
+        </div>
+        <div class="page-actions">
+          <span id="settings-version" class="muted small"></span>
+        </div>
+      </header>
+
+      <div class="settings-layout">
+        <article class="card">
+          <div class="card-head"><h3>当前设置</h3><span id="settings-meta" class="muted small"></span></div>
+          <form id="settings-form" class="settings-form" novalidate></form>
+          <div class="form-actions form-actions-bar">
+            <button type="button" class="btn btn-primary" data-action="settings-save" data-scope="settings">保存设置</button>
+            <button type="button" class="btn btn-ghost" data-action="settings-undo" data-scope="settings">撤销上次修改</button>
+            <button type="button" class="btn btn-danger-ghost" data-action="settings-reset" data-scope="settings">恢复默认</button>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><h3>修改历史</h3><span class="muted small">最近 20 条</span></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th class="col-num">版本</th><th>时间</th><th>操作者</th></tr></thead>
+              <tbody id="settings-history-tbody"></tbody>
+            </table>
+          </div>
+          <p class="muted small">「撤销上次修改」会恢复到上一版本，并把当前值写入新的历史版本。</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============================== 审计 ============================== -->
+    <section class="page" id="page-audit" data-page="audit" hidden>
+      <header class="page-head">
+        <div>
+          <h2>审计</h2>
+          <p class="page-sub">登录、配置变更、凭据/组变更、节点操作与拨测（敏感字段已脱敏）</p>
+        </div>
+      </header>
+
+      <form id="audit-filters" class="filter-bar" novalidate>
+        <div class="filter-item">
+          <label for="audit-since">开始时间</label>
+          <input id="audit-since" type="datetime-local">
+        </div>
+        <div class="filter-item">
+          <label for="audit-until">结束时间</label>
+          <input id="audit-until" type="datetime-local">
+        </div>
+        <div class="filter-item">
+          <label for="audit-action">动作</label>
+          <input id="audit-action" list="audit-action-list" placeholder="如 login / settings.update" spellcheck="false">
+          <datalist id="audit-action-list"></datalist>
+        </div>
+        <div class="filter-item">
+          <label for="audit-actor">操作者</label>
+          <input id="audit-actor" placeholder="管理员用户名" spellcheck="false">
+        </div>
+        <div class="filter-item">
+          <label for="audit-limit">每次条数</label>
+          <select id="audit-limit">
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200" selected>200</option>
+            <option value="500">500</option>
+          </select>
+        </div>
+        <div class="filter-actions">
+          <button type="submit" class="btn btn-primary">查询</button>
+          <button type="button" class="btn btn-ghost" data-action="audit-clear">清空筛选</button>
+        </div>
+      </form>
+
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>操作者</th>
+              <th>来源 IP</th>
+              <th>动作</th>
+              <th class="col-name">对象</th>
+              <th>结果</th>
+              <th class="col-actions">详情</th>
+            </tr>
+          </thead>
+          <tbody id="audit-tbody"></tbody>
+        </table>
+      </div>
+      <div class="table-footer">
+        <span id="audit-count" class="muted"></span>
+        <div class="pager">
+          <button type="button" class="btn btn-ghost btn-sm" data-action="audit-load-more" disabled>加载更多</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== 证书 ============================== -->
+    <section class="page" id="page-cert" data-page="cert" hidden>
+      <header class="page-head">
+        <div>
+          <h2>证书与 pin</h2>
+          <p class="page-sub">服务端身份证书（QUIC / wss / 面板共用）、SPKI 指纹与轮换</p>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="btn btn-safe" data-action="cert-install">生成安装命令</button>
+          <button type="button" class="btn btn-ghost" data-action="cert-reload">重载证书</button>
+          <button type="button" class="btn btn-primary" data-action="cert-rotate">生成下一枚 pin</button>
+        </div>
+      </header>
+
+      <div class="card-grid cert-grid">
+        <article class="card">
+          <div class="card-head"><h3>模式</h3></div>
+          <div id="cert-mode" class="cert-mode"></div>
+          <dl class="kv">
+            <dt>证书文件</dt><dd><code id="cert-cert-path">—</code></dd>
+            <dt>私钥文件</dt><dd><code id="cert-key-path">—</code></dd>
+          </dl>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h3>当前 pin</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="copy-el" data-target="cert-pin-value">复制</button>
+          </div>
+          <pre id="cert-pin-value" class="code-block code-inline">—</pre>
+          <p class="muted small">节点配置 <code>tls.pin</code> 使用该指纹（<code>sha256/&lt;base64&gt;</code>）。</p>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h3>下一枚 pin</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="copy-el" data-target="cert-pin-next-value">复制</button>
+          </div>
+          <pre id="cert-pin-next-value" class="code-block code-inline">—</pre>
+          <p class="muted small">轮换窗口：先在面板生成新 pin → 下发到节点（同时接受新旧两枚）→ 切换证书后移除旧 pin。</p>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><h3>有效期与重载</h3></div>
+          <div id="cert-not-after" class="cert-expiry"></div>
+          <dl class="kv">
+            <dt>上次重载</dt><dd id="cert-last-reload">—</dd>
+            <dt>最近错误</dt><dd id="cert-last-error">—</dd>
+          </dl>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============================== 归属地 provider ============================== -->
+    <section class="page" id="page-geo" data-page="geo" hidden>
+      <header class="page-head">
+        <div>
+          <h2>归属地 provider</h2>
+          <p class="page-sub">MMDB / preset / template / schema 三层 provider 状态与在线测试</p>
+        </div>
+        <div class="page-actions">
+          <span id="geo-count" class="muted small"></span>
+        </div>
+      </header>
+      <p class="notice">在线 provider 会把节点 IP 发送给第三方；需服务端显式开启 <code>geo.remote_consent: true</code>。连续失败 5 次自动摘除。</p>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="col-name">名称</th>
+              <th>类型</th>
+              <th>preset</th>
+              <th>启用</th>
+              <th>健康</th>
+              <th class="col-num">连续失败</th>
+              <th>最后错误</th>
+              <th class="col-num">优先级</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="geo-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============================== 接入 ============================== -->
+    <section class="page" id="page-access" data-page="access" hidden>
+      <header class="page-head">
+        <div>
+          <h2>接入</h2>
+          <p class="page-sub">节点一键接入脚本与接入令牌说明</p>
+        </div>
+      </header>
+
+      <div class="card-grid">
+        <article class="card span-2">
+          <div class="card-head">
+            <h3>接入脚本（Linux）</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="copy-el" data-target="access-linux-code">复制</button>
+          </div>
+          <p class="muted small" id="access-template-note"></p>
+          <pre id="access-linux-code" class="code-block">加载中…</pre>
+        </article>
+
+        <article class="card">
+          <div class="card-head">
+            <h3>服务端 SPKI pin</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="copy-el" data-target="access-pin-value">复制</button>
+          </div>
+          <pre id="access-pin-value" class="code-block code-inline">—</pre>
+          <p class="muted small">填入节点配置 <code>tls.pin</code>；如使用 <code>ca</code> 模式可忽略。</p>
+        </article>
+      </div>
+
+      <div class="card-grid">
+        <article class="card span-2">
+          <div class="card-head">
+            <h3>接入脚本（Windows）</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="copy-el" data-target="access-windows-code">复制</button>
+          </div>
+          <pre id="access-windows-code" class="code-block">加载中…</pre>
+        </article>
+
+        <article class="card">
+          <div class="card-head"><h3>节点接入令牌</h3></div>
+          <div id="access-token-note" class="token-note"></div>
+          <pre id="access-token-example" class="code-block">nodes:
+  tokens:
+    - node_id: "node-us-1"
+      token: "&lt;32 字节随机令牌&gt;"
+      note: "美西节点"
+    - node_id: "*"
+      token: "&lt;共享接入令牌&gt;"
+      note: "共享令牌"</pre>
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost btn-sm" data-action="copy-el" data-target="access-token-example">复制令牌配置示例</button>
+          </div>
+        </article>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="modal-root" hidden></div>
+<div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="false"></div>
+
+<noscript>
+  <div class="noscript">本面板需要启用 JavaScript 才能使用。</div>
+</noscript>
+
+</body>
+</html>

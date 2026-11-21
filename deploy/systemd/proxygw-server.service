@@ -1,0 +1,32 @@
+[Unit]
+Description=proxygw multi-node proxy gateway (server)
+Documentation=https://example.invalid/proxygw
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=proxygw
+Group=proxygw
+WorkingDirectory=/var/lib/proxygw
+ExecStart=/usr/local/bin/proxygw-server -config /etc/proxygw/config.server.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=3s
+# SIGTERM 优雅停机：停止接新连接，在途请求最多 10s 后退出
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/proxygw
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+LimitNOFILE=1048576
+# QUIC 吞吐相关的 UDP 缓冲
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

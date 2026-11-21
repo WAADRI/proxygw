@@ -1,0 +1,174 @@
+# proxygw 服务端配置示例
+#
+# 优先级：环境变量（NP_ 前缀，如 NP_SERVER_LISTEN_ADDR） > 本文件 > 内置默认值。
+# 复制为 config.server.yaml 后按需修改；所有字段均有中文说明。
+# 安全提示：默认不允许空口令/示例令牌上线，弱密钥需要显式 security.allow_insecure_defaults=true。
+
+# 状态目录：证书、凭据、组、规则、审计、运行覆盖等持久化文件都放在这里。
+state_dir: ./state
+
+log:
+  level: info          # debug | info | warn | error
+  format: json         # json | text
+
+server:
+  # TCP 端口同时承载：面板 HTTPS、WebSocket(wss) 隧道；UDP 同端口承载 QUIC 隧道。
+  # 公网部署请直接监听 :443 并放行 TCP+UDP 443；放在 nginx 之后只能走 wss（见 README）。
+  listen_addr: ":443"
+  # 面板生成节点安装命令时使用的外部地址，例如 https://gw.example.com。
+  public_url: ""
+  ui_enabled: true     # 面板页面开关（/healthz、/version、/metrics 始终可用）
+  proxy_protocol: false # 是否接受 PROXY protocol v2（服务端在 CDN/LB 之后时启用）
+
+proxy:
+  http_listen: ":8080"     # HTTP 代理与 CONNECT 入口；置空字符串可关闭
+  socks5_listen: ":1080"   # SOCKS5 入口；置空字符串可关闭
+  auth_mode: required      # none(仅回环) | optional | required（默认 required）
+  max_header_bytes: 65536  # 单个请求头最大字节数
+  max_concurrent: 0        # 入口全局最大并发连接，0=不限
+
+tunnel:
+  transport: auto   # auto(QUIC+WS 都接受) | quic | ws
+  planes: 2         # 期望每节点 2 条传输连接（每节点可配 1-8），仅用于提示与面板展示
+  allow_plain_ws: false # 仅回环/开发允许明文 ws://，开启会打印告警
+  alpn: proxygw/1
+  max_frame_bytes: 65536
+  quic_cc: cubic    # cubic | bbr
+  qlog_dir: ""      # 可选：QUIC qlog 输出目录
+
+tls:
+  mode: pin         # pin(自签+SPKI 指纹，默认) | ca(正规 CA 证书) | insecure(仅回环开发)
+  # ca 模式：填写证书与私钥文件（可由 certbot 等 ACME 客户端签发后热加载）。
+  cert_file: ""
+  key_file: ""
+  # mTLS 时校验节点客户端证书的 CA bundle；ca 模式可填私有 CA。
+  ca_file: ""
+  dir: ""           # 自签证书目录，默认 <state_dir>/certs
+  pin_next: ""      # 密钥轮换窗口中的下一枚 SPKI 指纹（sha256/...），可留空
+  hot_reload: true  # ca 模式证书文件变化/SIGHUP 自动热重载（新连接用新证书）
+  client_auth: none # none | require（require 需要 ca_file，建议节点接入用 mTLS）
+
+admin:
+  username: admin
+  # argon2id 或 bcrypt 哈希；留空则首次启动生成随机管理员密码并只在控制台打印一次，
+  # 哈希持久化到 <state_dir>/admin.json，重启后继续有效。
+  password_hash: ""
+  session_ttl: 12h
+  login_rate_per_min: 10   # 每 IP 每分钟登录尝试上限
+  login_lock_threshold: 5  # 连续失败锁定次数
+  login_lock_window: 5m
+  cookie_name: np_admin
+  # 可选 TOTP 二次验证（base32 secret），留空关闭。
+  totp_secret: ""
+
+nodes:
+  # 方式一（推荐）：mTLS。需 tls.mode=ca 且 tls.client_auth=require。
+  mtls: false
+  # 方式二：静态节点令牌。node_id 用 "*" 表示共享接入令牌；生产建议每节点独立。
+  # 留空则不配置静态令牌：启动时自动生成一个共享随机令牌并只在控制台打印一次，
+  # 也可在面板「节点接入」中签发/吊销。token 至少 16 个随机字符。
+  # tokens:
+  #   - node_id: "node-us-1"
+  #     token: "请替换为 32 字节随机令牌"
+  #     note: "美西节点"
+  #   - node_id: "*"
+  #     token: "请替换为共享接入令牌"
+  #     note: "共享令牌"
+
+# 运行时可热更设置（面板「运行设置」修改后持久化到 runtime-overrides.json，重启后覆盖这里）。
+settings:
+  scheduler:
+    strategy: fastest       # random | least_inflight | fastest | weighted
+    sticky:
+      enabled: true
+      ttl: 10m
+      max_keys_per_node: 1000
+    breaker:
+      failure_threshold: 5   # 连续失败阈值
+      failure_rate: 0.5      # 失败率阈值（≥min_samples 样本后生效）
+      min_samples: 20
+      open_timeout: 30s
+    retry:
+      enabled: true
+      max_attempts: 2        # 总尝试次数（含首次）；仅在响应首字节前重试
+  limits:
+    global_down_kbps: 0          # 0=不限；全局下行令牌桶
+    per_node_down_kbps: 0
+    per_credential_down_kbps: 0
+    max_streams_per_node: 1000   # 单节点并发流上限，超限返回 overloaded
+  timeouts:
+    open: 10s
+    read_header: 10s
+    idle: 30m
+    write_block: 30s
+    linger: 30s
+    drain: 10s
+    window_stall: 30s
+    dial_target: 10s
+  compression_enabled: false     # zstd 压缩（两端都支持时生效）
+  default_acl_action: allow
+
+geo:
+  enabled: true
+  mmdb_path: ""        # 本地 MMDB 文件路径（可选；缺失时仅用在线 provider 并告警）
+  cache_ttl: 24h
+  remote_consent: false # 启用在线 provider 必须显式设为 true（会把节点 IP 发给第三方）
+  max_concurrent: 4
+  rate_per_min: 60
+  egress:
+    # 出口 IP 回声端点：只返回纯文本 IP（兼容 JSON 带 ip 字段），IPv4/IPv6 分别探测。
+    echo_urls_v4:
+      - https://api.ipify.org
+      - https://icanhazip.com
+      - https://cloudflare.com/cdn-cgi/trace
+    echo_urls_v6:
+      - https://api64.ipify.org
+      - https://icanhazip.com
+      - https://cloudflare.com/cdn-cgi/trace
+    timeout: 2s
+  providers:
+    # preset：内置固定解析器，只需 URL（可选 token）；支持 {ip} 占位符。
+    # type: preset, preset: ipinfo
+    # type: preset, preset: ip-api
+    # type: preset, preset: ipwho.is
+    # type: preset, preset: cloudflare
+    # type: preset, preset: mmdb（使用上面的 mmdb_path）
+    - name: ipinfo
+      type: preset
+      preset: ipinfo
+      url: "https://ipinfo.io/{ip}/json"
+      token: ""
+      enabled: false
+      priority: 10
+    # template：用户自填 URL + 声明式字段映射（禁止自动嗅探格式）。
+    # 字段值：$.data.country（JSON 路径，支持数组下标）或 regex:country=([A-Z]{2})（纯文本正则捕获组 1）。
+    # - name: internal
+    #   type: template
+    #   url: "https://geo.internal.example/lookup?ip={ip}"
+    #   fields:
+    #     country: $.data.country
+    #     asn: $.data.asn
+    #     city: $.data.city
+    #   enabled: true
+    #   priority: 20
+    # schema：内部服务返回项目标准 JSON（见 README），用于完全自定义端点。
+    # - name: internal-schema
+    #   type: schema
+    #   url: "https://geo.internal.example/v1/ip/{ip}"
+    #   enabled: true
+    #   priority: 30
+
+observability:
+  metrics_enabled: true
+  metrics_path: /metrics
+  webhook_url: ""        # 告警 Webhook（节点离线/错误率突增/证书或 GeoIP 临近过期）
+  webhook_timeout: 5s
+  trend_retention: 15m   # 内存环形缓冲趋势窗口
+
+audit:
+  enabled: true
+  path: ""               # 默认 <state_dir>/runtime-audit.jsonl
+
+security:
+  # 仅本地开发可设为 true：允许弱口令/示例令牌、跳过部分安全校验。生产必须 false。
+  allow_insecure_defaults: false
