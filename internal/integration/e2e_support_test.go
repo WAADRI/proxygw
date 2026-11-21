@@ -636,6 +636,23 @@ func (p *e2ePanel) waitTopNNodes(nodeID string, want int64, timeout time.Duratio
 	}
 }
 
+// waitTopNNodesAbove polls the TopN node counters until nodeID exceeds above or
+// the timeout expires, then returns the last observed map. Same rationale as
+// waitTopNNodes: OnRequestEnd accounting is asynchronous with respect to the
+// client-visible response.
+func (p *e2ePanel) waitTopNNodesAbove(nodeID string, above int64, timeout time.Duration) map[string]int64 {
+	p.t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last map[string]int64
+	for {
+		last = p.topNNodes()
+		if last[nodeID] > above || time.Now().After(deadline) {
+			return last
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // settingsState is the decoded GET /api/v1/settings payload.
 type e2eSettingsState struct {
 	Current map[string]any `json:"current"`

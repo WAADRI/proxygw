@@ -322,6 +322,11 @@ func TestM3E2EFailClosedGroupIsolation(t *testing.T) {
 		} `json:"requests"`
 	}
 	panel.doJSON(http.MethodGet, "/api/v1/overview", nil, http.StatusOK, &overviewAfter)
+	errorsDeadline := time.Now().Add(5 * time.Second)
+	for overviewAfter.Requests.Errors <= overview.Requests.Errors && time.Now().Before(errorsDeadline) {
+		time.Sleep(20 * time.Millisecond)
+		panel.doJSON(http.MethodGet, "/api/v1/overview", nil, http.StatusOK, &overviewAfter)
+	}
 	if overviewAfter.Requests.Errors <= overview.Requests.Errors {
 		t.Fatalf("overview requests.errors = %d after a fail-closed 503, want > %d",
 			overviewAfter.Requests.Errors, overview.Requests.Errors)
@@ -334,7 +339,8 @@ func TestM3E2EFailClosedGroupIsolation(t *testing.T) {
 		status, body, err := e2eTryGET(client, origin.plain.URL+"/hello")
 		return err == nil && status == http.StatusOK && string(body) == e2eHelloBody
 	})
-	if recovered := panel.topNNodes(); recovered["node-a"] <= rounds {
+	recovered := panel.waitTopNNodesAbove("node-a", rounds, 5*time.Second)
+	if recovered["node-a"] <= rounds {
 		t.Fatalf("node-a served count = %d after recovery, want > %d: %v", recovered["node-a"], rounds, recovered)
 	}
 }
@@ -675,6 +681,11 @@ func TestM3M6E2EStickyAndFailover(t *testing.T) {
 		}
 	}
 	before := panel.topNNodes()
+	stickyDeadline := time.Now().Add(5 * time.Second)
+	for before["node-a"] < rounds && before["node-b"] < rounds && time.Now().Before(stickyDeadline) {
+		time.Sleep(20 * time.Millisecond)
+		before = panel.topNNodes()
+	}
 	pinned := ""
 	switch {
 	case before["node-a"] == rounds && before["node-b"] == 0:
@@ -719,7 +730,7 @@ func TestM3M6E2EStickyAndFailover(t *testing.T) {
 		status, body, err := e2eTryGET(client, origin.plain.URL+"/hello")
 		return err == nil && status == http.StatusOK && string(body) == e2eHelloBody
 	})
-	after := panel.topNNodes()
+	after := panel.waitTopNNodesAbove(survivor, before[survivor], 5*time.Second)
 	if after[survivor] <= before[survivor] {
 		t.Fatalf("surviving node %s served count did not increase: before=%v after=%v", survivor, before, after)
 	}
