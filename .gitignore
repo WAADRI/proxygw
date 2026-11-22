@@ -27,3 +27,5 @@ config.server.yaml
 config.client.yaml
 .env
 coverage.txt
+$cov
+*.cov
