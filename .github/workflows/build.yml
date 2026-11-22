@@ -201,9 +201,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download artifacts
+      - name: Download binary artifacts
         uses: actions/download-artifact@v4
         with:
+          # 只下载二进制矩阵的产物；docker 构建缓存等 artifact 不进入 release
+          pattern: node-proxy-*
           path: dist
           merge-multiple: true
 
