@@ -114,6 +114,7 @@ NP_LOG_LEVEL=debug \
 | `state_dir` | `./state` | 证书、凭据、组、规则、审计、运行覆盖等持久化目录 |
 | `server.listen_addr` | `:443` | TCP：面板 HTTPS + wss；UDP：QUIC（同端口） |
 | `server.public_url` | 空 | 面板生成安装命令用外部地址 |
+| `server.panel_domain` | 空 | 仅该域名（Host）可访问面板；其它 Host 直接断开连接，`/tunnel`、`/healthz` 等不受影响 |
 | `server.proxy_protocol` | false | 接受 PROXY protocol v2（CDN/LB 之后时启用） |
 | `proxy.http_listen` / `proxy.socks5_listen` | `:8080` / `:1080` | 入口监听；置空关闭 |
 | `proxy.auth_mode` | `required` | `none`（仅回环）/`optional`/`required` |
@@ -126,6 +127,15 @@ NP_LOG_LEVEL=debug \
 | `settings.*` | 见示例 | 运行设置默认值，面板修改后写入 `runtime-overrides.json` 覆盖 |
 | `geo.*` | 见示例 | 出口 IP 回声、MMDB、provider、隐私开关、缓存/限流 |
 | `observability.webhook_url` | 空 | 告警 Webhook（节点离线/错误率/证书或 GeoIP 临近过期） |
+
+面板域名限制示例（启用后，用 IP 或其它域名访问面板会直接断开，不返回任何 HTTP 内容）：
+
+```yaml
+server:
+  panel_domain: node.proxy.waadri.top
+```
+
+该限制只针对面板 UI/API；`/tunnel` 隧道和 `/healthz`、`/version`、`/metrics` 运维端点不受影响。Host 头可以被客户端伪造，因此它是访问收敛/反扫描措施，不替代面板认证与防火墙。
 
 ### 客户端
 

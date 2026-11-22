@@ -33,6 +33,7 @@ type ServerListenConfig struct {
 	ListenAddr    string `yaml:"listen_addr"`    // TCP: panel + wss tunnel; UDP: QUIC
 	PublicURL     string `yaml:"public_url"`     // external URL used for install commands
 	UIEnabled     bool   `yaml:"ui_enabled"`     // panel pages; health/metrics always served
+	PanelDomain   string `yaml:"panel_domain"`   // when set, only this Host may reach the panel
 	ProxyProtocol bool   `yaml:"proxy_protocol"` // accept PROXY protocol v2 on the TCP tunnel listener
 }
 
@@ -268,6 +269,11 @@ func (c *ServerConfig) Validate() error {
 	if _, _, err := ListenHostPort(c.Server.ListenAddr); err != nil {
 		return fieldErr("server.listen_addr", "%v", err)
 	}
+	panelDomain, err := NormalizePanelDomain(c.Server.PanelDomain)
+	if err != nil {
+		return fieldErr("server.panel_domain", "%v", err)
+	}
+	c.Server.PanelDomain = panelDomain
 	type listen struct {
 		field string
 		addr  string

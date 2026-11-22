@@ -257,6 +257,10 @@ func (s *Server) Listen() error {
 		mux.Handle(s.cfg.Observability.MetricsPath, s.metrics.Handler())
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if !s.panelHostAllowed(r) {
+			s.closePanelConnection(w, r)
+			return
+		}
 		if s.gateway != nil && s.gateway.panel != nil {
 			s.gateway.panel.Handler().ServeHTTP(w, r)
 			return
@@ -286,6 +290,10 @@ func (s *Server) Listen() error {
 		ln = wrapped
 		s.logger.Info("PROXY protocol v2 已启用（共享 TLS 监听；无头连接按普通 TCP 处理）")
 	}
+	if s.cfg.Server.PanelDomain != "" {
+		s.logger.Info("面板域名限制已启用，仅匹配 Host 的面板请求会被处理",
+			"panel_domain", s.cfg.Server.PanelDomain)
+	}
 	baseTLS := s.certMgr.TLSConfig().Clone()
 	baseTLS.NextProtos = []string{"http/1.1"}
 	tlsLn := tls.NewListener(ln, baseTLS)
@@ -300,6 +308,47 @@ func (s *Server) Listen() error {
 	s.logger.Info("共享监听已就绪（面板/wss/健康检查）", "addr", ln.Addr().String(), "tls_mode", s.cfg.TLS.Mode,
 		"hint", "QUIC 使用同端口 UDP；若部署在 nginx 之后只能走 wss")
 	return s.serveTLS(tlsLn)
+}
+
+// panelHostAllowed reports whether the request may reach the panel. When
+// server.panel_domain is empty every Host is accepted (the historical
+// behaviour); otherwise only the configured domain is allowed and the port is
+// ignored during comparison. The tunnel and operational endpoints are routed
+// before the panel fallback and are therefore not affected.
+func (s *Server) panelHostAllowed(r *http.Request) bool {
+	want := strings.TrimSpace(s.cfg.Server.PanelDomain)
+	if want != "" {
+		if h, _, err := net.SplitHostPort(want); err == nil {
+			want = h
+		}
+		want = strings.TrimSuffix(strings.ToLower(want), ".")
+	}
+	if want == "" {
+		return true
+	}
+	host := strings.TrimSpace(r.Host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	return host == want
+}
+
+// closePanelConnection closes the underlying connection without writing an
+// HTTP response. The panel is a browser-facing surface, so a mismatched Host
+// gets no status line, no body and no hint that the panel exists there.
+func (s *Server) closePanelConnection(w http.ResponseWriter, r *http.Request) {
+	s.logger.Debug("面板域名不匹配，关闭连接",
+		"host", r.Host, "remote", r.RemoteAddr)
+	if hj, ok := w.(http.Hijacker); ok {
+		conn, _, err := hj.Hijack()
+		if err == nil {
+			_ = conn.Close()
+			return
+		}
+	}
+	// HTTP/2 or a non-hijackable writer: abort without a response.
+	panic(http.ErrAbortHandler)
 }
 
 func (s *Server) serveTLS(ln net.Listener) error {

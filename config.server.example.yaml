@@ -17,6 +17,9 @@ server:
   listen_addr: ":443"
   # 面板生成节点安装命令时使用的外部地址，例如 https://gw.example.com。
   public_url: ""
+  # 非空时仅允许这个域名(Host)访问面板；其它 Host 不发任何响应直接断开连接。
+  # /tunnel 隧道与 /healthz、/version、/metrics 运维端点不受影响。
+  panel_domain: ""
   ui_enabled: true     # 面板页面开关（/healthz、/version、/metrics 始终可用）
   proxy_protocol: false # 是否接受 PROXY protocol v2（服务端在 CDN/LB 之后时启用）
 
