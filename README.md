@@ -249,38 +249,56 @@ NP_LOG_LEVEL=debug \
 
 ## 部署
 
-### Docker
+### Docker（推荐直接使用预构建镜像）
+
+GitHub Actions 的 `Build` 工作流会为 main 构建 `linux/amd64` + `linux/arm64` 多架构镜像并推送到 GHCR：
+
+- `ghcr.io/waadri/proxygw-server`：面板 + wss/QUIC 隧道 + HTTP/SOCKS5 代理入口
+- `ghcr.io/waadri/proxygw-client`：节点客户端
+
+可用 tag：`latest`、`main`、`sha-<commit>`；推送 `v*` tag 时会自动生成对应版本 tag。
+
+包默认私有，首次拉取需用带 `read:packages` 权限的 PAT 登录（也可在 GitHub 包设置里把可见性改为 Public）：
 
 ```bash
-docker build -f deploy/Dockerfile.server -t proxygw-server:latest .
-docker build -f deploy/Dockerfile.client -t proxygw-client:latest .
-
-# 服务端（注意 443 UDP 也要映射）
-docker run -d --name proxygw-server --restart unless-stopped \
-  -p 443:443/tcp -p 443:443/udp -p 8080:8080 -p 1080:1080 \
-  -v $PWD/config.server.yaml:/etc/proxygw/config.server.yaml:ro \
-  -v proxygw-state:/var/lib/proxygw/state \
-  proxygw-server:latest -config /etc/proxygw/config.server.yaml
+echo "<PAT>" | docker login ghcr.io -u <GitHub 用户名> --password-stdin
+docker pull ghcr.io/waadri/proxygw-server:latest
+docker pull ghcr.io/waadri/proxygw-client:latest
 ```
 
-docker-compose：`deploy/docker-compose.server.yml`、`deploy/docker-compose.client.yml`（参数全走环境变量）。
-
-节点侧 Docker 的完整步骤（单机多节点、QUIC/wss、验证与排障）见 **[docs/DOCKER_NODE.md](docs/DOCKER_NODE.md)**，最短路径：
+服务端（注意 443 UDP 也要映射；镜像以非 root 运行，已授予绑定 443 的 capability）：
 
 ```bash
-docker build -f deploy/Dockerfile.client \
-  --build-arg GOPROXY=https://goproxy.cn,direct -t proxygw-client:1.0.4 .
+cp config.server.example.yaml config.server.yaml   # 按需修改
+docker run -d --name proxygw-server --restart unless-stopped \
+  -p 443:443/tcp -p 443:443/udp -p 8080:8080 -p 1080:1080 \
+  -v "$PWD/config.server.yaml:/etc/proxygw/config.server.yaml:ro" \
+  -v proxygw-state:/var/lib/proxygw/state \
+  ghcr.io/waadri/proxygw-server:latest -config /etc/proxygw/config.server.yaml
+```
 
+节点（只主动外连，最少给 `SERVER_URL` / `AUTH_TOKEN` / `CLIENT_ID` 即可）：
+
+```bash
 docker run -d --name proxygw-node-1 --restart unless-stopped \
   -e SERVER_URL=https://gw.example.com:443 \
   -e AUTH_TOKEN='<节点接入令牌>' \
-  -e CLIENT_ID=node-docker-1 -e TAGS='docker,test' \
+  -e CLIENT_ID=node-docker-1 \
+  -e TAGS='docker,test' \
   -e TRANSPORT=auto -e PLANES=2 -e TLS_MODE=ca \
   -v proxygw-node-1-state:/var/lib/proxygw/state \
-  proxygw-client:1.0.4
+  ghcr.io/waadri/proxygw-client:latest
 ```
 
-镜像内置「环境变量优先」的默认配置（`deploy/config.client.docker.yaml`），通常无需挂载配置文件；节点只主动外连 TCP/UDP 443，不需要映射任何入站端口。
+节点侧完整步骤（单机多节点、compose、排障）见 **[docs/DOCKER_NODE.md](docs/DOCKER_NODE.md)**。
+compose 示例默认也使用 GHCR 镜像：`deploy/docker-compose.server.yml`、`deploy/docker-compose.client.yml`。
+
+从源码构建镜像（可选）：
+
+```bash
+docker build -f deploy/Dockerfile.server -t proxygw-server:dev .
+docker build -f deploy/Dockerfile.client -t proxygw-client:dev .
+```
 
 ### systemd
 

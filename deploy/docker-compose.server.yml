@@ -1,15 +1,9 @@
-# proxygw 服务端 docker-compose 示例
-# 所有参数通过环境变量注入；敏感值请写入 .env 或使用 docker secret。
+# proxygw 服务端 docker-compose 示例（默认使用 GHCR 预构建镜像）
+# 使用前：准备 config.server.yaml，并按需修改下面的环境变量。
+# TAG 可取 latest / main / sha-<commit> / v1.0.x（发布后）
 services:
   proxygw-server:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.server
-      args:
-        VERSION: ${VERSION:-dev}
-        COMMIT: ${COMMIT:-none}
-        BUILD_TIME: ${BUILD_TIME:-unknown}
-    image: proxygw-server:${VERSION:-dev}
+    image: ghcr.io/waadri/proxygw-server:${TAG:-latest}
     container_name: proxygw-server
     restart: unless-stopped
     ports:
@@ -48,8 +42,14 @@ services:
     sysctls:
       net.core.rmem_max: "2500000"
       net.core.wmem_max: "2500000"
-    security_opt:
-      - no-new-privileges:true
+    # 镜像内以非 root 运行，绑定 443/1080 依赖文件 capability（镜像已 setcap）；
+    # 启用 no-new-privileges 会阻止该能力，因此这里不开启。
+    # security_opt:
+    #   - no-new-privileges:true
+    # 如需从源码构建：取消下面 build 注释并执行 docker compose up -d --build
+    # build:
+    #   context: ..
+    #   dockerfile: deploy/Dockerfile.server
 
 volumes:
   proxygw-server-state:

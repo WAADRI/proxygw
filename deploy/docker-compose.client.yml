@@ -1,22 +1,15 @@
-# proxygw 节点侧 docker-compose 示例（单节点）
+# proxygw 节点侧 docker-compose 示例（默认使用 GHCR 预构建镜像）
 #
 # 用法（在仓库根目录执行）：
 #   cp deploy/.env.client.example deploy/.env.client   # 填 SERVER_URL / AUTH_TOKEN / CLIENT_ID
-#   docker compose -f deploy/docker-compose.client.yml --env-file deploy/.env.client up -d --build
+#   docker compose -f deploy/docker-compose.client.yml --env-file deploy/.env.client up -d
 #
 # 一台机器跑多个节点：每个节点用不同 CLIENT_ID、不同 compose 项目名（-p），
 # 例如 docker compose -f deploy/docker-compose.client.yml -p node-1 --env-file .env.node1 up -d
 services:
   proxygw-client:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.client
-      args:
-        VERSION: ${VERSION:-dev}
-        COMMIT: ${COMMIT:-none}
-        BUILD_TIME: ${BUILD_TIME:-unknown}
-        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
-    image: proxygw-client:${VERSION:-dev}
+    # TAG 可取 latest / main / sha-<commit> / v1.0.x（发布后）
+    image: ghcr.io/waadri/proxygw-client:${TAG:-latest}
     # 用 CLIENT_ID 作容器名，便于一机多节点时区分
     container_name: ${CLIENT_ID:-proxygw-client}
     restart: unless-stopped
@@ -55,6 +48,13 @@ services:
     # read_only: true
     # tmpfs:
     #   - /tmp
+    # 如需从源码构建：取消下面 build 注释并执行 docker compose up -d --build
+    # build:
+    #   context: ..
+    #   dockerfile: deploy/Dockerfile.client
+    #   args:
+    #     VERSION: ${VERSION:-dev}
+    #     GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
 
 volumes:
   proxygw-client-state:

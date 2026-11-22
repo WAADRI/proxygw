@@ -4,7 +4,27 @@
 
 本文以示例服务端 `https://gw.example.com:443` 为例，请替换为实际地址。
 
-## 1. 构建镜像
+## 1. 获取镜像
+
+### 1.1 直接使用 GHCR 预构建镜像（推荐）
+
+GitHub Actions 会为每次 main 构建多架构镜像（linux/amd64 + linux/arm64）：
+
+- `ghcr.io/waadri/proxygw-client`
+- `ghcr.io/waadri/proxygw-server`
+
+可用 tag：`latest`、`main`、`sha-<commit>`；推送 `v*` tag 时还会生成对应的版本 tag（如 `v1.0.5`）。
+
+包默认私有，拉取前用带 `read:packages` 权限的 PAT 登录（也可以在 GitHub 包设置里把可见性改为 Public，之后可匿名拉取）：
+
+```bash
+echo "<PAT>" | docker login ghcr.io -u <GitHub 用户名> --password-stdin
+docker pull ghcr.io/waadri/proxygw-client:latest
+```
+
+下文的 `docker run` 命令直接使用 `ghcr.io/waadri/proxygw-client:latest`，无需本地构建。
+
+### 1.2 从源码构建（可选）
 
 ```bash
 git clone https://github.com/WAADRI/proxygw.git
@@ -12,26 +32,14 @@ cd proxygw
 
 # 国内网络可指定 Go 模块代理
 docker build -f deploy/Dockerfile.client \
-  --build-arg VERSION=1.0.4 \
+  --build-arg VERSION=dev \
   --build-arg GOPROXY=https://goproxy.cn,direct \
-  -t proxygw-client:1.0.4 .
+  -t proxygw-client:dev .
 ```
 
 镜像特性：多阶段静态编译、`alpine` 运行、非 root（`proxygw` 用户）、内置「环境变量优先」的默认配置、`/var/lib/proxygw/state` 声明为卷。
 
-仓库的 GitHub Actions 也会自动构建并推送多架构镜像到 GHCR：
-
-- `ghcr.io/waadri/proxygw-client`
-- `ghcr.io/waadri/proxygw-server`
-
-拉取前需使用具有 `read:packages` 权限的 PAT 登录（包默认私有）：
-
-```bash
-echo "<PAT>" | docker login ghcr.io -u <GitHub 用户名> --password-stdin
-docker pull ghcr.io/waadri/proxygw-client:latest
-```
-
-## 2. 单节点：docker run（推荐，无需配置文件）
+## 2. 单节点：docker run
 
 镜像内置了「环境变量优先」的默认配置（`deploy/config.client.docker.yaml`），
 只要给全 `SERVER_URL` / `AUTH_TOKEN` / `CLIENT_ID` 即可运行：
@@ -51,7 +59,7 @@ docker run -d \
   -e TLS_MODE=ca \
   -e LOG_LEVEL=info \
   -v proxygw-node-1-state:/var/lib/proxygw/state \
-  proxygw-client:1.0.4
+  ghcr.io/waadri/proxygw-client:latest
 ```
 
 查看日志（看到 `会话注册成功，进入 ready`、`"transport":"quic"` 即成功）：
@@ -59,6 +67,8 @@ docker run -d \
 ```bash
 docker logs -f proxygw-node-1
 ```
+
+> 使用本地构建的镜像时，把最后的镜像名换成 `proxygw-client:dev` 即可。
 
 ## 3. 一台机器加多个节点
 
@@ -76,7 +86,7 @@ for i in 1 2 3; do
     -e TAGS='docker,test' \
     -e TRANSPORT=auto -e PLANES=2 -e COMPRESSION=true -e TLS_MODE=ca \
     -v "proxygw-node-$i-state:/var/lib/proxygw/state" \
-    proxygw-client:1.0.4
+    ghcr.io/waadri/proxygw-client:latest
 done
 ```
 
@@ -85,10 +95,12 @@ done
 
 ## 4. 用 docker compose 管理
 
+`deploy/docker-compose.client.yml` 默认直接使用 GHCR 镜像：
+
 ```bash
 cp deploy/.env.client.example deploy/.env.client
-# 编辑 deploy/.env.client：SERVER_URL / AUTH_TOKEN / CLIENT_ID / ALIAS / TAGS
-docker compose -f deploy/docker-compose.client.yml --env-file deploy/.env.client up -d --build
+# 编辑 deploy/.env.client：SERVER_URL / AUTH_TOKEN / CLIENT_ID / ALIAS / TAGS / TAG
+docker compose -f deploy/docker-compose.client.yml --env-file deploy/.env.client up -d
 docker compose -f deploy/docker-compose.client.yml --env-file deploy/.env.client logs -f
 ```
 
@@ -98,6 +110,8 @@ docker compose -f deploy/docker-compose.client.yml --env-file deploy/.env.client
 docker compose -f deploy/docker-compose.client.yml -p node-1 --env-file .env.node1 up -d
 docker compose -f deploy/docker-compose.client.yml -p node-2 --env-file .env.node2 up -d
 ```
+
+需要从源码构建时，在 compose 文件中取消 `build:` 注释并使用 `--build`。
 
 ## 5. 配置项（环境变量）
 
@@ -135,6 +149,7 @@ docker compose -f deploy/docker-compose.client.yml -p node-2 --env-file .env.nod
 | 容器启动即退出，提示 `STATE_DIR` 不可写 | 使用命名卷（如示例）或把宿主目录 `chown` 给容器内 uid；不要用 root 拥有的 bind mount |
 | 时间不同步/时钟偏移告警 | 容器与宿主机需 NTP；时钟偏移过大时服务端会拒绝注册 |
 | 面板出现重复出口 IP 提示 | 同一台机器跑多个节点属正常现象；真实多地区出口需部署到不同 VPS |
+| 拉取 GHCR 镜像 401/denied | 包为私有：先 `docker login ghcr.io`（PAT 需 `read:packages`），或在包设置中改为 Public |
 
 ## 8. 安全建议
 
@@ -142,4 +157,4 @@ docker compose -f deploy/docker-compose.client.yml -p node-2 --env-file .env.nod
 - 保持非 root、`no-new-privileges`；可再加 `--read-only` + `--tmpfs /tmp`（state 卷单独可写）。
 - 容器不需要任何入站端口，不要加 `-p` 映射。
 - 生产环境建议每节点独立令牌（服务端 `nodes.tokens` 配置）或启用 mTLS，而不是共享令牌。
-- 升级：重新 `docker build` 生成新 tag → `docker rm -f` + 重新 `docker run`（state 卷保留，节点 ID 不变）；或 compose `up -d --build`。
+- 升级：重新拉取新 tag → `docker rm -f` + 重新 `docker run`（state 卷保留，节点 ID 不变）；或 compose `up -d` 拉取新镜像。
