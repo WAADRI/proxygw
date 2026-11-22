@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -128,12 +129,22 @@ func TestAdminConfiguredHashLogin(t *testing.T) {
 // mustRejectJWT verifies that VerifyToken rejects a malformed token.
 func mustRejectJWT(t *testing.T, mgr *AdminManager, token string, want error) {
 	t.Helper()
-	last := token[len(token)-1]
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || len(parts[2]) < 2 {
+		t.Fatalf("unexpected JWT shape: %q", token)
+	}
+	// Tamper a character in the middle of the signature segment. Changing the
+	// last base64url character is not reliable: the encoder leaves unused bits
+	// in the trailing character, so several different characters can decode to
+	// exactly the same signature bytes and the token would remain valid.
+	sig := parts[2]
+	idx := len(sig) / 2
 	replacement := byte('A')
-	if last == 'A' {
+	if sig[idx] == 'A' {
 		replacement = 'B'
 	}
-	tampered := token[:len(token)-1] + string(replacement)
+	tamperedSig := sig[:idx] + string(replacement) + sig[idx+1:]
+	tampered := parts[0] + "." + parts[1] + "." + tamperedSig
 	if tampered == token {
 		t.Fatal("failed to tamper with token")
 	}
