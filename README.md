@@ -155,6 +155,8 @@ server:
 
 > 客户端**不开放**心跳、握手、并发、退避等行为参数；配置中出现这些键会被显式忽略并在 stderr 告警，避免节点行为漂移破坏隧道状态机语义。
 
+> 服务端优雅停机（`docker stop/restart`、`systemctl stop`、升级重启等）会向节点发送 `KICK(shutdown)`。客户端收到后排空在途流，**保持进程运行**，5 秒后重建 agent 自动重连；只有本地 `SIGTERM/SIGINT`、令牌/证书等致命错误才会退出。因此直接以二进制运行（无 systemd/Docker restart 策略）也能在服务端重启后自动恢复。
+
 ## 隧道协议
 
 ### WebSocket 帧

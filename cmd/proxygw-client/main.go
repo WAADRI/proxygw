@@ -8,15 +8,28 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"proxygw/internal/app"
 	"proxygw/internal/config"
 	"proxygw/internal/logx"
+	"proxygw/internal/nodeagent"
 	"proxygw/internal/version"
 )
+
+// clientSession is the subset of app.Client the reconnect loop needs; tests
+// replace it with a fake.
+type clientSession interface {
+	Run(context.Context) error
+	Close() error
+	Status() nodeagent.Status
+	ClientID() string
+	BootMessages() []string
+}
 
 func main() { os.Exit(run()) }
 
@@ -54,39 +67,88 @@ func run() int {
 		return 0
 	}
 
-	client, err := app.NewClient(app.ClientOptions{Config: cfg, Logger: logger})
-	if err != nil {
-		logger.Error("节点初始化失败", "error", err)
-		return 1
-	}
-	defer func() { _ = client.Close() }()
-	for _, msg := range client.BootMessages() {
-		logger.Warn(msg)
-	}
-	logger.Info("节点配置就绪",
-		"server", cfg.ServerURL,
-		"client_id", client.ClientID(),
-		"alias", cfg.Alias,
-		"region", cfg.Region,
-		"tags", cfg.NormalizedTags(),
-		"transport", cfg.Transport,
-		"quic_fallback", cfg.QUICFallback,
-		"planes", cfg.Planes,
-		"tls_mode", cfg.TLS.Mode)
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := client.Run(ctx); err != nil {
-		if nodeagentFatal(err) {
-			logger.Error("节点因致命错误退出（不会自动重连）", "error", err)
-		} else {
-			logger.Error("节点异常退出", "error", err)
+	return runClientLoop(ctx, logger, cfg, func() (clientSession, error) {
+		return app.NewClient(app.ClientOptions{Config: cfg, Logger: logger})
+	}, shutdownReconnectDelay)
+}
+
+// shutdownReconnectDelay gives a restarting server time to come back before the
+// fresh agent starts dialing. The agent still applies its normal backoff when
+// the server stays unavailable.
+const shutdownReconnectDelay = 5 * time.Second
+
+// runClientLoop keeps the process alive across server-initiated shutdowns. A
+// nil Run return without a cancelled local context means the server drained the
+// session for a restart, so a fresh agent is built after delay. Fatal errors,
+// local signals and a non-nil Run error still terminate the process.
+func runClientLoop(ctx context.Context, logger *slog.Logger, cfg *config.ClientConfig, newClient func() (clientSession, error), delay time.Duration) int {
+	first := true
+	var lastTransport string
+	var lastPlanes int
+	for {
+		client, err := newClient()
+		if err != nil {
+			logger.Error("节点初始化失败", "error", err)
+			return 1
 		}
-		return 1
+		if first {
+			for _, msg := range client.BootMessages() {
+				logger.Warn(msg)
+			}
+			logger.Info("节点配置就绪",
+				"server", cfg.ServerURL,
+				"client_id", client.ClientID(),
+				"alias", cfg.Alias,
+				"region", cfg.Region,
+				"tags", cfg.NormalizedTags(),
+				"transport", cfg.Transport,
+				"quic_fallback", cfg.QUICFallback,
+				"planes", cfg.Planes,
+				"tls_mode", cfg.TLS.Mode)
+			first = false
+		}
+
+		runErr := client.Run(ctx)
+		st := client.Status()
+		_ = client.Close()
+		lastTransport, lastPlanes = st.Transport, st.Planes
+		if runErr != nil {
+			if nodeagentFatal(runErr) {
+				logger.Error("节点因致命错误退出（不会自动重连）", "error", runErr)
+			} else {
+				logger.Error("节点异常退出", "error", runErr)
+			}
+			return 1
+		}
+		if ctx.Err() != nil {
+			break
+		}
+		logger.Warn("服务端已停机，节点保持运行并准备重连",
+			"event", "agent.reconnect",
+			"retry_after_ms", delay.Milliseconds())
+		if !sleepCtx(ctx, delay) {
+			break
+		}
 	}
-	st := client.Status()
-	logger.Info("proxygw-client 已退出", "transport", st.Transport, "planes", st.Planes)
+	logger.Info("proxygw-client 已退出", "transport", lastTransport, "planes", lastPlanes)
 	return 0
+}
+
+// sleepCtx waits for d unless ctx is cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return ctx.Err() == nil
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func loadClientConfig(path string) (*config.ClientConfig, []string, error) {
