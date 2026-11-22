@@ -258,10 +258,9 @@ GitHub Actions 的 `Build` 工作流会为 main 构建 `linux/amd64` + `linux/ar
 
 可用 tag：`latest`、`main`、`sha-<commit>`；推送 `v*` tag 时会自动生成对应版本 tag。
 
-包默认私有，首次拉取需用带 `read:packages` 权限的 PAT 登录（也可在 GitHub 包设置里把可见性改为 Public）：
+镜像已公开（GHCR Public），可直接拉取，无需 `docker login`：
 
 ```bash
-echo "<PAT>" | docker login ghcr.io -u <GitHub 用户名> --password-stdin
 docker pull ghcr.io/waadri/proxygw-server:latest
 docker pull ghcr.io/waadri/proxygw-client:latest
 ```

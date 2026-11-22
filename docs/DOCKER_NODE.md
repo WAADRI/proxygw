@@ -15,10 +15,9 @@ GitHub Actions 会为每次 main 构建多架构镜像（linux/amd64 + linux/arm
 
 可用 tag：`latest`、`main`、`sha-<commit>`；推送 `v*` tag 时还会生成对应的版本 tag（如 `v1.0.5`）。
 
-包默认私有，拉取前用带 `read:packages` 权限的 PAT 登录（也可以在 GitHub 包设置里把可见性改为 Public，之后可匿名拉取）：
+镜像已公开（GHCR Public），可直接匿名拉取，无需 `docker login`：
 
 ```bash
-echo "<PAT>" | docker login ghcr.io -u <GitHub 用户名> --password-stdin
 docker pull ghcr.io/waadri/proxygw-client:latest
 ```
 
@@ -149,7 +148,7 @@ docker compose -f deploy/docker-compose.client.yml -p node-2 --env-file .env.nod
 | 容器启动即退出，提示 `STATE_DIR` 不可写 | 使用命名卷（如示例）或把宿主目录 `chown` 给容器内 uid；不要用 root 拥有的 bind mount |
 | 时间不同步/时钟偏移告警 | 容器与宿主机需 NTP；时钟偏移过大时服务端会拒绝注册 |
 | 面板出现重复出口 IP 提示 | 同一台机器跑多个节点属正常现象；真实多地区出口需部署到不同 VPS |
-| 拉取 GHCR 镜像 401/denied | 包为私有：先 `docker login ghcr.io`（PAT 需 `read:packages`），或在包设置中改为 Public |
+| 拉取 GHCR 镜像 401/denied | 包可能被设为私有或触发匿名拉取限制：确认包可见性为 Public，或临时 `docker login ghcr.io`（PAT 需 `read:packages`） |
 
 ## 8. 安全建议
 
