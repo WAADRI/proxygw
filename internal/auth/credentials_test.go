@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -262,6 +263,110 @@ func TestCredentialVerifyClassification(t *testing.T) {
 	// A future expiry is fine.
 	if _, err := store.Verify("dave", "dave-pass"); err != nil {
 		t.Fatalf("Verify(dave): %v", err)
+	}
+}
+
+func TestVerifyCachesSuccessfulPasswordAndInvalidatesOnRotation(t *testing.T) {
+	store := newMemoryStore(t)
+	cred, err := store.Create(mkCredential(t, "cached", "first-pass"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if _, err := store.Verify("cached", "first-pass"); err != nil {
+		t.Fatalf("Verify first: %v", err)
+	}
+	if _, err := store.Verify("cached", "first-pass"); err != nil {
+		t.Fatalf("Verify second: %v", err)
+	}
+
+	store.verifyMu.Lock()
+	cached := len(store.verifyCache)
+	store.verifyMu.Unlock()
+	if cached != 1 {
+		t.Fatalf("successful verify cache size = %d, want 1", cached)
+	}
+
+	// A wrong password must not create a cache entry.
+	if _, err := store.Verify("cached", "wrong-pass"); err == nil {
+		t.Fatal("wrong password accepted")
+	}
+	store.verifyMu.Lock()
+	if got := len(store.verifyCache); got != 1 {
+		store.verifyMu.Unlock()
+		t.Fatalf("failed verify cache size = %d, want 1", got)
+	}
+	store.verifyMu.Unlock()
+
+	// Rotating the password must invalidate the cached old password without a
+	// restart, while the new password authenticates.
+	raw, ok := store.Get(cred.ID)
+	if !ok {
+		t.Fatal("credential disappeared")
+	}
+	raw.PasswordHash = mustCheapHash(t, "second-pass")
+	if _, err := store.Update(raw); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	var ve *VerifyError
+	if _, err := store.Verify("cached", "first-pass"); !errors.As(err, &ve) || ve.Kind != VerifyBadPassword {
+		t.Fatalf("old password after rotation: %v", err)
+	}
+	if _, err := store.Verify("cached", "second-pass"); err != nil {
+		t.Fatalf("new password after rotation: %v", err)
+	}
+}
+
+func TestVerifyCacheRechecksDisabledState(t *testing.T) {
+	store := newMemoryStore(t)
+	cred, err := store.Create(mkCredential(t, "toggle", "toggle-pass"))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := store.Verify("toggle", "toggle-pass"); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	raw, ok := store.Get(cred.ID)
+	if !ok {
+		t.Fatal("credential disappeared")
+	}
+	raw.Enabled = false
+	if _, err := store.Update(raw); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	var ve *VerifyError
+	if _, err := store.Verify("toggle", "toggle-pass"); !errors.As(err, &ve) || ve.Kind != VerifyDisabled {
+		t.Fatalf("disabled credential with warm cache: %v", err)
+	}
+}
+
+func TestVerifyConcurrentSamePassword(t *testing.T) {
+	store := newMemoryStore(t)
+	if _, err := store.Create(mkCredential(t, "burst", "burst-pass")); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	const workers = 64
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := store.Verify("burst", "burst-pass"); err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent Verify: %v", err)
+	}
+	store.verifyMu.Lock()
+	cached := len(store.verifyCache)
+	store.verifyMu.Unlock()
+	if cached != 1 {
+		t.Fatalf("concurrent cache size = %d, want 1", cached)
 	}
 }
 

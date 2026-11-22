@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
@@ -67,12 +69,45 @@ var (
 // JSON array. It is safe for concurrent use. Reads take a read lock only; writes
 // mutate memory under the writer lock and perform disk I/O outside of it,
 // serialized by opMu so that file snapshots can never be written out of order.
+// Argon2id verification is intentionally memory-hard (64 MiB per call). Without
+// throttling, a burst of proxy connections can exhaust the host before the
+// password check completes. Successful checks are therefore cached briefly and
+// cold verifications run with a small concurrency limit; both bounds are
+// independent of the number of client connections.
+const (
+	credentialVerifyCacheTTL    = 5 * time.Minute
+	credentialVerifyCacheLimit  = 4096
+	credentialVerifyConcurrency = 4
+)
+
+// verifyCacheKey identifies one successful (username, password) pair without
+// keeping the plaintext password in memory.
+type verifyCacheKey struct {
+	username string
+	digest   [sha256.Size]byte
+}
+
+// verifyCacheEntry is tied to the credential's current password hash so that a
+// password rotation invalidates the cached result without a global flush.
+type verifyCacheEntry struct {
+	credentialID string
+	passwordHash string
+	expiresAt    time.Time
+}
+
 type CredentialStore struct {
 	mu       sync.RWMutex
 	opMu     sync.Mutex // serializes disk writers (never held while waiting for mu)
 	items    []model.Credential
 	idxByID  map[string]int
 	idxByUsr map[string]int // lower-cased username -> index
+
+	// verifyMu guards verifyCache; verifySem bounds concurrent Argon2 calls and
+	// verifySecret keys the password digests used as cache keys.
+	verifyMu     sync.Mutex
+	verifyCache  map[verifyCacheKey]verifyCacheEntry
+	verifySem    chan struct{}
+	verifySecret [32]byte
 
 	path string
 	doc  *store.JSON[[]model.Credential]
@@ -100,7 +135,14 @@ func NewCredentialStore(path string, logger *slog.Logger) (*CredentialStore, err
 		flushInterval: time.Second,
 		idxByID:       make(map[string]int),
 		idxByUsr:      make(map[string]int),
+		verifyCache:   make(map[verifyCacheKey]verifyCacheEntry),
+		verifySem:     make(chan struct{}, credentialVerifyConcurrency),
 	}
+	secret, err := randomBytes(32)
+	if err != nil {
+		return nil, fmt.Errorf("初始化凭据校验缓存失败: %w", err)
+	}
+	copy(s.verifySecret[:], secret)
 	if s.path == "" {
 		s.lastFlush = s.now()
 		return s, nil
@@ -475,20 +517,42 @@ func (s *CredentialStore) removeIndexLocked(idx int) {
 // exists -> enabled -> not expired (UTC) -> password. Any failure returns a
 // *VerifyError carrying the classification; success returns the full credential
 // (including hash) for internal use and never writes to disk.
+//
+// Successful password checks are cached for a short time because Argon2id is
+// deliberately expensive (64 MiB, t=3) and proxy clients reconnect frequently.
+// Cold checks are additionally serialized by verifySem so that a connection
+// burst cannot allocate one 64 MiB Argon2 buffer per connection concurrently.
 func (s *CredentialStore) Verify(username, password string) (model.Credential, error) {
 	name := strings.TrimSpace(username)
 	c, ok := s.GetByUsername(name)
 	if !ok {
 		return model.Credential{}, &VerifyError{Kind: VerifyNoCredential, Username: name}
 	}
-	if !c.Enabled {
-		s.logger().Debug("代理凭据已禁用", "credential", c.Username, "credential_id", c.ID)
-		return model.Credential{}, &VerifyError{Kind: VerifyDisabled, Username: c.Username}
+	if verr := s.credentialUsable(c); verr != nil {
+		s.logVerifyFailure(c, verr)
+		return model.Credential{}, verr
 	}
-	if c.ExpiresAt != nil && !c.ExpiresAt.After(s.now().UTC()) {
-		s.logger().Debug("代理凭据已过期", "credential", c.Username, "credential_id", c.ID)
-		return model.Credential{}, &VerifyError{Kind: VerifyExpired, Username: c.Username}
+	if s.verifyCacheHit(c, password) {
+		return c, nil
 	}
+
+	// Bound the number of simultaneous Argon2 buffers. A queued caller may have
+	// to wait, so re-read the credential afterwards: it may have been disabled,
+	// rotated or deleted while waiting.
+	release := s.acquireVerifySlot()
+	defer release()
+	c, ok = s.GetByUsername(name)
+	if !ok {
+		return model.Credential{}, &VerifyError{Kind: VerifyNoCredential, Username: name}
+	}
+	if verr := s.credentialUsable(c); verr != nil {
+		s.logVerifyFailure(c, verr)
+		return model.Credential{}, verr
+	}
+	if s.verifyCacheHit(c, password) {
+		return c, nil
+	}
+
 	matched, err := VerifyPassword(c.PasswordHash, password)
 	if err != nil {
 		// Corrupted stored hash: log the cause (never the hash) and fail closed.
@@ -499,7 +563,111 @@ func (s *CredentialStore) Verify(username, password string) (model.Credential, e
 		s.logger().Debug("代理凭据密码错误", "credential", c.Username, "credential_id", c.ID)
 		return model.Credential{}, &VerifyError{Kind: VerifyBadPassword, Username: c.Username}
 	}
+	s.storeVerifyCache(c, password)
 	return c, nil
+}
+
+// credentialUsable applies the non-password checks shared by the cache and cold
+// verification paths.
+func (s *CredentialStore) credentialUsable(c model.Credential) *VerifyError {
+	if !c.Enabled {
+		return &VerifyError{Kind: VerifyDisabled, Username: c.Username}
+	}
+	now := s.now()
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if c.ExpiresAt != nil && !c.ExpiresAt.After(now.UTC()) {
+		return &VerifyError{Kind: VerifyExpired, Username: c.Username}
+	}
+	return nil
+}
+
+func (s *CredentialStore) logVerifyFailure(c model.Credential, verr *VerifyError) {
+	switch verr.Kind {
+	case VerifyDisabled:
+		s.logger().Debug("代理凭据已禁用", "credential", c.Username, "credential_id", c.ID)
+	case VerifyExpired:
+		s.logger().Debug("代理凭据已过期", "credential", c.Username, "credential_id", c.ID)
+	}
+}
+
+// verifyDigest turns the presented password into a cache key without retaining
+// the plaintext.
+func (s *CredentialStore) verifyDigest(password string) [sha256.Size]byte {
+	mac := hmac.New(sha256.New, s.verifySecret[:])
+	_, _ = mac.Write([]byte(password))
+	var out [sha256.Size]byte
+	copy(out[:], mac.Sum(nil))
+	return out
+}
+
+// verifyCacheHit reports whether this credential and password already passed an
+// Argon2 check recently. The cached entry is rejected as soon as the credential
+// id or stored password hash differs.
+func (s *CredentialStore) verifyCacheHit(c model.Credential, password string) bool {
+	if s.verifyCache == nil {
+		return false
+	}
+	key := verifyCacheKey{username: strings.ToLower(c.Username), digest: s.verifyDigest(password)}
+	now := s.now()
+	if now.IsZero() {
+		now = time.Now()
+	}
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	entry, ok := s.verifyCache[key]
+	if !ok {
+		return false
+	}
+	if !now.Before(entry.expiresAt) || entry.credentialID != c.ID || entry.passwordHash != c.PasswordHash {
+		delete(s.verifyCache, key)
+		return false
+	}
+	return true
+}
+
+// storeVerifyCache records a successful check. The cache is bounded so a large
+// credential table cannot pin unbounded memory.
+func (s *CredentialStore) storeVerifyCache(c model.Credential, password string) {
+	if s.verifyCache == nil {
+		return
+	}
+	now := s.now()
+	if now.IsZero() {
+		now = time.Now()
+	}
+	key := verifyCacheKey{username: strings.ToLower(c.Username), digest: s.verifyDigest(password)}
+	s.verifyMu.Lock()
+	defer s.verifyMu.Unlock()
+	if len(s.verifyCache) >= credentialVerifyCacheLimit {
+		for k, entry := range s.verifyCache {
+			if !now.Before(entry.expiresAt) {
+				delete(s.verifyCache, k)
+			}
+		}
+		for k := range s.verifyCache {
+			if len(s.verifyCache) < credentialVerifyCacheLimit {
+				break
+			}
+			delete(s.verifyCache, k)
+		}
+	}
+	s.verifyCache[key] = verifyCacheEntry{
+		credentialID: c.ID,
+		passwordHash: c.PasswordHash,
+		expiresAt:    now.Add(credentialVerifyCacheTTL),
+	}
+}
+
+// acquireVerifySlot blocks until one of the bounded Argon2 verification slots is
+// free. It never returns nil so callers can always defer the release function.
+func (s *CredentialStore) acquireVerifySlot() func() {
+	if s.verifySem == nil {
+		return func() {}
+	}
+	s.verifySem <- struct{}{}
+	return func() { <-s.verifySem }
 }
 
 // MarkUsed records a successful use: LastUsedAt is set and the traffic counters

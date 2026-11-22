@@ -136,7 +136,10 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if cfg.Nodes.MTLS {
 		logger.Warn("mTLS 模式已启用：面板、/healthz 与 wss 隧道共用同一 TCP 监听，浏览器访问面板时同样会被要求出示客户端证书；生产建议为面板保留独立入口或仅在隧道侧启用客户端证书校验")
 	}
-	if len(cfg.Nodes.Tokens) == 0 && !cfg.Nodes.MTLS {
+	if len(cfg.Nodes.Tokens) == 0 && !cfg.Nodes.MTLS && len(authn.List()) == 0 {
+		// Only mint the bootstrap shared token on a genuinely empty token store.
+		// Issuing "*" on every restart would replace the persisted wildcard token
+		// and invalidate every node that was configured with the previous value.
 		token, issueErr := authn.Issue("*", "bootstrap shared token")
 		if issueErr != nil {
 			return nil, fmt.Errorf("app: generate bootstrap node token: %w", issueErr)
