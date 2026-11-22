@@ -46,6 +46,7 @@ type pingEntry struct {
 type session struct {
 	srv       *Server
 	conn      transport.Conn
+	ctrlMu    sync.RWMutex
 	ctrl      transport.ControlStream
 	transport string
 
@@ -158,11 +159,28 @@ func (sess *session) onStateChange(from, to fsm.SessionState, event fsm.SessionE
 	}
 }
 
+// setControl publishes the control stream acquired during handshake. It is
+// synchronized because shutdown/drain paths may send a KICK while a connection
+// is still handshaking (and therefore before this assignment happens).
+func (sess *session) setControl(ctrl transport.ControlStream) {
+	sess.ctrlMu.Lock()
+	sess.ctrl = ctrl
+	sess.ctrlMu.Unlock()
+}
+
+// control returns the control stream, if the handshake has acquired it yet.
+func (sess *session) control() transport.ControlStream {
+	sess.ctrlMu.RLock()
+	defer sess.ctrlMu.RUnlock()
+	return sess.ctrl
+}
+
 // sendFrame serializes writes on the control stream. The transport is expected
 // to serialize writes as well; the mutex additionally protects fake transports
 // and keeps PONG/PING ordering sane.
 func (sess *session) sendFrame(typ protocol.FrameType, payload []byte) error {
-	if sess.ctrl == nil {
+	ctrl := sess.control()
+	if ctrl == nil {
 		return errors.New("tunnel: no control stream")
 	}
 	timeout := sess.srv.times.Ping
@@ -173,7 +191,7 @@ func (sess *session) sendFrame(typ protocol.FrameType, payload []byte) error {
 	defer cancel()
 	sess.sendMu.Lock()
 	defer sess.sendMu.Unlock()
-	return sess.ctrl.Send(ctx, typ, payload)
+	return ctrl.Send(ctx, typ, payload)
 }
 
 func (sess *session) sendJSON(typ protocol.FrameType, v any) error {
@@ -227,7 +245,7 @@ func (sess *session) handshake() error {
 	if err != nil {
 		return fmt.Errorf("control stream: %w", err)
 	}
-	sess.ctrl = ctrl
+	sess.setControl(ctrl)
 
 	helloCtx, hcancel := context.WithTimeout(sess.ctx, s.times.Hello)
 	typ, payload, err := ctrl.Recv(helloCtx)
@@ -510,8 +528,12 @@ func (s *Server) compressionAgreed(hello *protocol.Hello) bool {
 // readyLoop reads and dispatches control frames until the session dies.
 func (sess *session) readyLoop() {
 	s := sess.srv
+	ctrl := sess.control()
+	if ctrl == nil {
+		return
+	}
 	for {
-		typ, payload, err := sess.ctrl.Recv(sess.ctx)
+		typ, payload, err := ctrl.Recv(sess.ctx)
 		if err != nil {
 			if sess.isDraining() || s.isClosing() {
 				return
@@ -804,8 +826,8 @@ func (sess *session) shut(reason error) {
 			}
 		}
 		sess.cancel()
-		if sess.ctrl != nil {
-			_ = sess.ctrl.Close()
+		if ctrl := sess.control(); ctrl != nil {
+			_ = ctrl.Close()
 		}
 		_ = sess.conn.CloseWithError(code, reasonText)
 		close(sess.closedCh)
