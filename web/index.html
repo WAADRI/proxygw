@@ -602,7 +602,7 @@
       <header class="page-head">
         <div>
           <h2>接入</h2>
-          <p class="page-sub">节点一键接入脚本与接入令牌说明</p>
+          <p class="page-sub">节点一键接入脚本、令牌签发/吊销与接入说明</p>
         </div>
       </header>
 
@@ -648,6 +648,53 @@
       note: "共享令牌"</pre>
           <div class="form-actions">
             <button type="button" class="btn btn-ghost btn-sm" data-action="copy-el" data-target="access-token-example">复制令牌配置示例</button>
+          </div>
+        </article>
+      </div>
+
+      <div class="card-grid">
+        <article class="card span-2">
+          <div class="card-head">
+            <h3>节点令牌管理</h3>
+            <button type="button" class="btn btn-ghost btn-sm" data-action="token-refresh">刷新</button>
+          </div>
+          <p class="muted small">每个节点使用独立令牌；面板签发的令牌只显示一次。共享令牌在首个节点认证后会绑定该节点，不能再给其它节点使用。</p>
+
+          <form id="token-issue-form" class="inline-form" novalidate>
+            <div class="form-field">
+              <label for="token-node-id">节点 ID</label>
+              <input id="token-node-id" type="text" placeholder="node-1" spellcheck="false" autocomplete="off">
+            </div>
+            <div class="form-field">
+              <label for="token-note">备注</label>
+              <input id="token-note" type="text" placeholder="例如：湖南电信节点" maxlength="256">
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-primary" data-action="token-issue">签发令牌</button>
+            </div>
+          </form>
+
+          <div id="access-issued-token-wrap" class="token-note" hidden>
+            <p class="muted small"><strong>令牌只显示这一次</strong>，请立即复制到节点配置；关闭页面后无法再次查看。</p>
+            <pre id="access-issued-token" class="code-block"></pre>
+            <div class="form-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="copy-el" data-target="access-issued-token">复制令牌</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>节点 ID</th>
+                  <th>备注</th>
+                  <th>状态</th>
+                  <th>创建时间</th>
+                  <th class="col-actions">操作</th>
+                </tr>
+              </thead>
+              <tbody id="token-tbody"></tbody>
+            </table>
           </div>
         </article>
       </div>

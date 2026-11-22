@@ -44,6 +44,9 @@ type Options struct {
 	Sched    SchedAPI
 	Cert     CertAPI
 	Stats    StatsAPI
+	// NodeTokens manages node tunnel credentials. When nil the token endpoints
+	// degrade to 503 and the rest of the panel keeps working.
+	NodeTokens NodeTokensAPI
 	// KickCredential immediately closes every existing proxy session of the
 	// credential and returns how many were kicked. Provided by app.
 	KickCredential func(credentialID string) int
@@ -62,6 +65,14 @@ type Options struct {
 	// working. CSRFCookieName has no config equivalent and normally stays "".
 	CookieName     string
 	CSRFCookieName string
+}
+
+// NodeTokensAPI is the subset of the node authenticator needed to issue, list
+// and revoke tunnel credentials.
+type NodeTokensAPI interface {
+	Issue(nodeID, note string) (string, error)
+	Revoke(nodeID string) error
+	List() []model.NodeToken
 }
 
 // SessionInfo is one tunnel session as exposed by the tunnel layer.

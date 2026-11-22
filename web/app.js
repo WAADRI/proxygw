@@ -4101,7 +4101,8 @@
   function loadAccess() {
     return Promise.all([
       api('/cert').then(function (value) { return { ok: true, value: value }; }, function (err) { return { ok: false, error: err }; }),
-      api('/nodes/install-template').then(function (value) { return { ok: true, value: value }; }, function (err) { return { ok: false, error: err }; })
+      api('/nodes/install-template').then(function (value) { return { ok: true, value: value }; }, function (err) { return { ok: false, error: err }; }),
+      api('/nodes/tokens').then(function (value) { return { ok: true, value: value }; }, function (err) { return { ok: false, error: err }; })
     ]).then(function (results) {
       var cert = results[0].ok ? results[0].value : (state.cert || {});
       var template = results[1].ok ? results[1].value : null;
@@ -4116,6 +4117,7 @@
       if (!results[1].ok) note = '安装模板接口不可用（' + ((results[1].error && results[1].error.message) || '未知错误') + '），以下为内置示例命令。';
       setText('access-template-note', note);
       renderAccessTokenNote();
+      renderNodeTokens(results[2]);
       if (!results[0].ok && results[1].ok) {
         toast('证书信息获取失败，pin 可能未自动填入', 'warn');
       }
@@ -4128,14 +4130,104 @@
     clear(container);
     var list = el('ul');
     [
-      '节点接入令牌在服务端首次启动时只打印一次（哈希持久化，重启后仍有效）。',
-      '可在 config.server.yaml 的 nodes.tokens 中配置每节点独立令牌，node_id 使用 "*" 表示共享接入令牌。',
+      '一节点一令牌；面板签发后令牌只显示一次，请立即保存。',
+      '共享令牌在首个节点认证后会绑定该节点，不能再给其它节点使用。',
       '启用 mTLS（nodes.mtls=true 且 tls.client_auth=require）时，节点可使用客户端证书接入而无需令牌。',
-      '当前面板 API 契约（docs/PANEL_API.md）未提供节点令牌签发/吊销接口；如需在面板内管理令牌，需要后端补充接口。'
+      '可在下方「节点令牌管理」中签发、查看状态或吊销令牌。'
     ].forEach(function (text) {
       list.append(el('li', null, text));
     });
     container.append(list);
+  }
+
+  function loadNodeTokens() {
+    var tbody = $('token-tbody');
+    if (!tbody) return Promise.resolve();
+    return api('/nodes/tokens').then(function (data) {
+      renderNodeTokens({ ok: true, value: data });
+    }, function (err) {
+      renderNodeTokens({ ok: false, error: err });
+    });
+  }
+
+  function renderNodeTokens(result) {
+    var tbody = $('token-tbody');
+    if (!tbody) return;
+    if (!result || !result.ok) {
+      emptyRow(tbody, 5, '节点令牌接口不可用：' + ((result && result.error && result.error.message) || '未知错误'));
+      return;
+    }
+    var items = (result.value && result.value.items) || [];
+    if (!items.length) {
+      emptyRow(tbody, 5, '尚未签发节点令牌。');
+      return;
+    }
+    var frag = document.createDocumentFragment();
+    items.forEach(function (item) {
+      var tr = el('tr');
+      tr.append(el('td', null, item.node_id || '—'));
+      tr.append(el('td', null, item.note || '—'));
+      var tdStatus = el('td');
+      tdStatus.append(badge(item.revoked ? '已吊销' : '有效', item.revoked ? 'fail' : 'ok'));
+      tr.append(tdStatus);
+      tr.append(el('td', null, fmtDateTime(item.created_at)));
+      var tdActions = el('td', 'col-actions');
+      if (!item.revoked) {
+        var btn = el('button', 'btn btn-danger-ghost btn-sm', '吊销');
+        btn.type = 'button';
+        btn.dataset.action = 'token-revoke';
+        btn.dataset.nodeId = item.node_id;
+        tdActions.append(btn);
+      } else {
+        tdActions.append(document.createTextNode('—'));
+      }
+      tr.append(tdActions);
+      frag.append(tr);
+    });
+    tbody.replaceChildren(frag);
+  }
+
+  function issueNodeToken() {
+    var nodeIDEl = $('token-node-id');
+    var noteEl = $('token-note');
+    var nodeID = ((nodeIDEl && nodeIDEl.value) || '').trim();
+    var note = ((noteEl && noteEl.value) || '').trim();
+    if (!nodeID) {
+      toast('请填写节点 ID', 'warn');
+      return;
+    }
+    var button = qs('[data-action="token-issue"]');
+    setBusy(button, true, '签发中…');
+    api('/nodes/tokens', { method: 'POST', body: { node_id: nodeID, note: note } })
+      .then(function (data) {
+        var wrap = $('access-issued-token-wrap');
+        setText('access-issued-token', data && data.token ? data.token : '');
+        if (wrap) wrap.hidden = false;
+        if (noteEl) noteEl.value = '';
+        toast('节点令牌已签发（只显示一次）', 'success');
+        return loadNodeTokens();
+      })
+      .catch(showApiError)
+      .then(function () {
+        setBusy(button, false);
+      });
+  }
+
+  function revokeNodeToken(nodeID) {
+    if (!nodeID) return;
+    confirmDialog({
+      title: '吊销节点令牌',
+      message: '确定吊销节点「' + nodeID + '」的所有令牌吗？',
+      note: '该节点会被立即踢下线，之后必须使用新令牌才能重新接入。',
+      confirmText: '吊销',
+      danger: true,
+      onConfirm: function () {
+        return api('/nodes/tokens/' + enc(nodeID), { method: 'DELETE' }).then(function () {
+          toast('节点令牌已吊销', 'success');
+          return loadNodeTokens();
+        });
+      }
+    });
   }
 
   function groupField(options) {
@@ -4161,6 +4253,9 @@
       if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     },
     'refresh-page': function () { refreshCurrentPage(); },
+    'token-refresh': function () { loadNodeTokens(); },
+    'token-issue': function () { issueNodeToken(); },
+    'token-revoke': function (target) { revokeNodeToken(target.dataset.nodeId); },
     logout: function () { logout(); },
     'banner-retry': function () {
       setBanner('network', null);
@@ -4316,6 +4411,12 @@
 
     var stickyPreview = $('sticky-preview-form');
     if (stickyPreview) stickyPreview.addEventListener('submit', onStickyPreviewSubmit);
+
+    var tokenIssue = $('token-issue-form');
+    if (tokenIssue) tokenIssue.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      issueNodeToken();
+    });
 
     var auditFilters = $('audit-filters');
     if (auditFilters) auditFilters.addEventListener('submit', function (ev) {

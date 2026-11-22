@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"sort"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -100,6 +101,59 @@ func (f *fakeTunnel) PingNode(ctx context.Context, nodeID string) (time.Duration
 func (f *fakeTunnel) NodePlaneCount(nodeID string) int { return 0 }
 
 func (f *fakeTunnel) ActiveStreams() int64 { return f.active }
+
+// fakeNodeTokens is the in-memory NodeTokensAPI used by panel tests.
+type fakeNodeTokens struct {
+	mu        sync.Mutex
+	tokens    map[string]model.NodeToken
+	issueErr  error
+	revokeErr error
+	next      int
+}
+
+func (f *fakeNodeTokens) Issue(nodeID, note string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.issueErr != nil {
+		return "", f.issueErr
+	}
+	f.next++
+	token := fmt.Sprintf("np_test_token_%d_%s", f.next, nodeID)
+	f.tokens[nodeID] = model.NodeToken{
+		NodeID:    nodeID,
+		Note:      note,
+		CreatedAt: testNow,
+		UpdatedAt: testNow,
+	}
+	return token, nil
+}
+
+func (f *fakeNodeTokens) Revoke(nodeID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.revokeErr != nil {
+		return f.revokeErr
+	}
+	entry := f.tokens[nodeID]
+	entry.NodeID = nodeID
+	entry.Revoked = true
+	if entry.CreatedAt.IsZero() {
+		entry.CreatedAt = testNow
+	}
+	f.tokens[nodeID] = entry
+	return nil
+}
+
+func (f *fakeNodeTokens) List() []model.NodeToken {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]model.NodeToken, 0, len(f.tokens))
+	for _, token := range f.tokens {
+		out = append(out, token)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].NodeID < out[j].NodeID })
+	return out
+}
 
 type fakeGeo struct {
 	mu         sync.Mutex
@@ -254,6 +308,8 @@ type testEnv struct {
 	sched  *fakeSched
 	cert   *fakeCert
 	stats  *fakeStats
+	// nodeTokens is the fake NodeTokensAPI wired into Options.
+	nodeTokens *fakeNodeTokens
 
 	kickMu     sync.Mutex
 	kickCounts map[string]int
@@ -375,6 +431,7 @@ func newTestEnvWith(t *testing.T, envOpts testEnvOptions) *testEnv {
 	}
 	if !envOpts.noFakes {
 		env.tunnel = &fakeTunnel{active: 7, pingLatency: 12 * time.Millisecond}
+		env.nodeTokens = &fakeNodeTokens{tokens: make(map[string]model.NodeToken)}
 		env.geo = &fakeGeo{statuses: []ProviderStatus{
 			{Name: "mmdb", Type: "preset", Preset: "mmdb", Enabled: true, Healthy: true, Priority: 1},
 			{Name: "ipinfo", Type: "template", Preset: "ipinfo", Enabled: true, Healthy: true, Priority: 2},
@@ -411,6 +468,7 @@ func newTestEnvWith(t *testing.T, envOpts testEnvOptions) *testEnv {
 		opts.Sched = env.sched
 		opts.Cert = env.cert
 		opts.Stats = env.stats
+		opts.NodeTokens = env.nodeTokens
 	}
 	env.opts = opts
 

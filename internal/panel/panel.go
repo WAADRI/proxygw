@@ -210,6 +210,9 @@ func (s *Server) buildRoutes() []routeEntry {
 		// Nodes.
 		route(http.MethodGet, "/api/v1/nodes", s.handleNodesList),
 		route(http.MethodGet, "/api/v1/nodes/install-template", s.handleInstallTemplate),
+		route(http.MethodGet, "/api/v1/nodes/tokens", s.handleNodeTokensList),
+		route(http.MethodPost, "/api/v1/nodes/tokens", s.handleNodeTokenIssue),
+		route(http.MethodDelete, "/api/v1/nodes/tokens/{id}", s.handleNodeTokenRevoke),
 		route(http.MethodPatch, "/api/v1/nodes/{id}", s.handleNodePatch),
 		route(http.MethodPost, "/api/v1/nodes/{id}/kick", s.handleNodeKick),
 		route(http.MethodPost, "/api/v1/nodes/{id}/probe", s.handleNodeProbe),

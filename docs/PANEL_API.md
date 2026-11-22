@@ -46,6 +46,11 @@
   → `{ok, latency_ms, detail, result_b64, error}`（写审计）
 - `GET /nodes/{id}/install-command` → `{command, pin, server_url}`（不含接入令牌）
 - `GET /nodes/install-template` → `{linux:"...", windows:"..."}`（令牌占位符）
+- `GET /nodes/tokens` → `{items:[{node_id,note,revoked,created_at}]}`（不返回 token/hash）
+- `POST /nodes/tokens`：`{node_id,note?}` → `201 {token, node:{node_id,note,revoked,created_at}}`
+  - 令牌只在响应中返回一次，服务端仅保存哈希；写审计 `token.create`
+- `DELETE /nodes/tokens/{id}` → `{ok:true}`（吊销该节点全部令牌并踢下线；写审计 `token.revoke`）
+- 注：`config.server.yaml` 中 `node_id: "*"` 的静态共享令牌只由配置文件管理，不出现在列表接口中，也不能通过面板吊销。
 
 ## 节点组
 
