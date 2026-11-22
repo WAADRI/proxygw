@@ -35,10 +35,11 @@ import (
 // shows the provider as unhealthy and node registration still works with online
 // providers or an unknown region.
 type mmdbLayer struct {
-	names    []string // provider names that refer to the local MMDB
-	path     string
-	primary  string
-	priority int
+	names        []string // provider names that refer to the local MMDB
+	path         string
+	primary      string
+	priority     int
+	nameLanguage string // preferred localized name tag; empty means English
 
 	mu      sync.Mutex
 	reader  *maxminddb.Reader
@@ -53,8 +54,14 @@ type mmdbLayer struct {
 
 // newMMDBLayer opens the configured MMDB (when path is non-empty) and returns a
 // layer that never fails construction.
-func newMMDBLayer(path string, names []string, priority int) *mmdbLayer {
-	layer := &mmdbLayer{path: path, names: names, priority: priority, enabled: true}
+func newMMDBLayer(path string, names []string, priority int, nameLanguage string) *mmdbLayer {
+	layer := &mmdbLayer{
+		path:         path,
+		names:        names,
+		priority:     priority,
+		enabled:      true,
+		nameLanguage: strings.TrimSpace(nameLanguage),
+	}
 	if len(names) > 0 {
 		layer.primary = names[0]
 	} else {
@@ -127,22 +134,22 @@ func (m *mmdbLayer) lookup(ip net.IP) (model.Geo, map[string]string, error) {
 	if err := reader.Lookup(ip, &record); err != nil {
 		return model.Geo{}, nil, fmt.Errorf("mmdb lookup %s: %w", ip, err)
 	}
-	return geoFromMMDBMap(record)
+	return geoFromMMDBMap(record, m.nameLanguage)
 }
 
 // geoFromMMDBMap maps a decoded MMDB record to the normalized Geo model.
-func geoFromMMDBMap(record map[string]any) (model.Geo, map[string]string, error) {
+func geoFromMMDBMap(record map[string]any, nameLanguage string) (model.Geo, map[string]string, error) {
 	geo := model.Geo{}
 	hitPaths := map[string]string{}
 	if country, path := mmdbCountry(record); country != "" {
 		geo.Country = country
 		hitPaths[geoFieldCountry] = path
 	}
-	if region, path := mmdbRegion(record); region != "" {
+	if region, path := mmdbRegion(record, nameLanguage); region != "" {
 		geo.Region = region
 		hitPaths[geoFieldRegion] = path
 	}
-	if city, path := mmdbCity(record); city != "" {
+	if city, path := mmdbCity(record, nameLanguage); city != "" {
 		geo.City = city
 		hitPaths[geoFieldCity] = path
 	}
@@ -150,8 +157,7 @@ func geoFromMMDBMap(record map[string]any) (model.Geo, map[string]string, error)
 		geo.ASN = asn
 		hitPaths[geoFieldASN] = path
 	}
-	if org, path := mmdbTextFrom(record,
-		"autonomous_system_organization", "as_name", "as_org", "organization", "org"); org != "" {
+	if org, path := mmdbASNOrg(record); org != "" {
 		geo.ASNOrg = org
 		hitPaths[geoFieldASNOrg] = path
 	}
@@ -190,10 +196,10 @@ func mmdbCountry(record map[string]any) (string, string) {
 }
 
 // mmdbRegion extracts the most specific first-level region name.
-func mmdbRegion(record map[string]any) (string, string) {
+func mmdbRegion(record map[string]any, nameLanguage string) (string, string) {
 	if items, ok := record["subdivisions"].([]any); ok && len(items) > 0 {
 		if subdivision := mmdbMap(items[0]); subdivision != nil {
-			if name, suffix := mmdbNameFromObject(subdivision); name != "" {
+			if name, suffix := mmdbNameFromObject(subdivision, nameLanguage); name != "" {
 				return name, "subdivisions[0]." + suffix
 			}
 			if code := mmdbText(subdivision["iso_code"]); code != "" {
@@ -202,7 +208,7 @@ func mmdbRegion(record map[string]any) (string, string) {
 		}
 	}
 	if subdivision := mmdbMap(record["subdivision"]); subdivision != nil {
-		if name, suffix := mmdbNameFromObject(subdivision); name != "" {
+		if name, suffix := mmdbNameFromObject(subdivision, nameLanguage); name != "" {
 			return name, "subdivision." + suffix
 		}
 	}
@@ -210,9 +216,9 @@ func mmdbRegion(record map[string]any) (string, string) {
 }
 
 // mmdbCity extracts the city name.
-func mmdbCity(record map[string]any) (string, string) {
+func mmdbCity(record map[string]any, nameLanguage string) (string, string) {
 	if city := mmdbMap(record["city"]); city != nil {
-		if name, suffix := mmdbNameFromObject(city); name != "" {
+		if name, suffix := mmdbNameFromObject(city, nameLanguage); name != "" {
 			return name, "city." + suffix
 		}
 	}
@@ -222,8 +228,21 @@ func mmdbCity(record map[string]any) (string, string) {
 	return mmdbTextFrom(record, "city_name", "cityName")
 }
 
-// mmdbASN extracts the integer ASN from numeric or "AS123" style values.
+// mmdbASN extracts the integer ASN from numeric or "AS123" style values. It
+// accepts both flat keys and the nested "asn" object used by merged databases.
 func mmdbASN(record map[string]any) (int, string) {
+	if asn, path := mmdbASNFromFields(record); asn > 0 {
+		return asn, path
+	}
+	if nested := mmdbMap(record["asn"]); nested != nil {
+		if asn, path := mmdbASNFromFields(nested); asn > 0 {
+			return asn, "asn." + path
+		}
+	}
+	return 0, ""
+}
+
+func mmdbASNFromFields(record map[string]any) (int, string) {
 	for _, key := range []string{"autonomous_system_number", "asn", "as_number"} {
 		value, ok := record[key]
 		if !ok {
@@ -244,6 +263,22 @@ func mmdbASN(record map[string]any) (int, string) {
 	return 0, ""
 }
 
+// mmdbASNOrg extracts the ASN organization from flat keys or the nested "asn"
+// object.
+func mmdbASNOrg(record map[string]any) (string, string) {
+	if org, path := mmdbTextFrom(record,
+		"autonomous_system_organization", "as_name", "as_org", "organization", "org"); org != "" {
+		return org, path
+	}
+	if nested := mmdbMap(record["asn"]); nested != nil {
+		if org, path := mmdbTextFrom(nested,
+			"autonomous_system_organization", "as_name", "as_org", "organization", "org"); org != "" {
+			return org, "asn." + path
+		}
+	}
+	return "", ""
+}
+
 // mmdbTextFrom returns the first non-empty string field and its key.
 func mmdbTextFrom(record map[string]any, keys ...string) (string, string) {
 	for _, key := range keys {
@@ -254,18 +289,52 @@ func mmdbTextFrom(record map[string]any, keys ...string) (string, string) {
 	return "", ""
 }
 
-// mmdbNameFromObject extracts an English (or first available) localized name
-// from a MaxMind "names" object, falling back to a top-level "name" field.
-func mmdbNameFromObject(object map[string]any) (string, string) {
-	if names := mmdbMap(object["names"]); names != nil {
-		if name := mmdbText(names["en"]); name != "" {
-			return name, "names.en"
-		}
+// mmdbNameFromObject extracts a localized name from a MaxMind "names" object.
+// The requested language (for example zh-CN) is tried first, then its base
+// language (zh), then English, and finally any other available language. An
+// empty language keeps the historical English-first behaviour.
+func mmdbNameFromObject(object map[string]any, language string) (string, string) {
+	if names := mmdbMap(object["names"]); names != nil && len(names) > 0 {
 		keys := make([]string, 0, len(names))
 		for key := range names {
 			keys = append(keys, key)
 		}
 		sort.Strings(keys)
+		language = strings.TrimSpace(language)
+		wanted := []string{}
+		if language != "" {
+			wanted = append(wanted, language)
+			if base, _, ok := strings.Cut(language, "-"); ok && base != "" {
+				wanted = append(wanted, base)
+			}
+		}
+		wanted = append(wanted, "en")
+		seen := map[string]bool{}
+		for _, want := range wanted {
+			lowerWant := strings.ToLower(want)
+			if seen[lowerWant] {
+				continue
+			}
+			seen[lowerWant] = true
+			for _, key := range keys {
+				if strings.EqualFold(key, want) {
+					if name := mmdbText(names[key]); name != "" {
+						return name, "names." + key
+					}
+				}
+			}
+			// A base language tag such as "zh" also accepts "zh-Hans"/"zh-CN"
+			// when no exact match exists.
+			if !strings.Contains(lowerWant, "-") {
+				for _, key := range keys {
+					if strings.HasPrefix(strings.ToLower(key), lowerWant+"-") {
+						if name := mmdbText(names[key]); name != "" {
+							return name, "names." + key
+						}
+					}
+				}
+			}
+		}
 		for _, key := range keys {
 			if name := mmdbText(names[key]); name != "" {
 				return name, "names." + key

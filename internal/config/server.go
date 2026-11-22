@@ -127,14 +127,15 @@ type ProviderConfig struct {
 
 // GeoConfig configures egress IP resolution and geolocation enrichment.
 type GeoConfig struct {
-	Enabled       bool             `yaml:"enabled"`
-	MMDBPath      string           `yaml:"mmdb_path"`
-	CacheTTL      model.Duration   `yaml:"cache_ttl"`
-	Egress        EgressConfig     `yaml:"egress"`
-	Providers     []ProviderConfig `yaml:"providers"`
-	RemoteConsent bool             `yaml:"remote_consent"` // required before remote providers are allowed
-	MaxConcurrent int              `yaml:"max_concurrent"`
-	RatePerMin    int              `yaml:"rate_per_min"`
+	Enabled          bool             `yaml:"enabled"`
+	MMDBPath         string           `yaml:"mmdb_path"`
+	MMDBNameLanguage string           `yaml:"mmdb_name_language"` // preferred localized name tag, e.g. zh-CN; empty = en
+	CacheTTL         model.Duration   `yaml:"cache_ttl"`
+	Egress           EgressConfig     `yaml:"egress"`
+	Providers        []ProviderConfig `yaml:"providers"`
+	RemoteConsent    bool             `yaml:"remote_consent"` // required before remote providers are allowed
+	MaxConcurrent    int              `yaml:"max_concurrent"`
+	RatePerMin       int              `yaml:"rate_per_min"`
 }
 
 // ObservabilityConfig configures metrics, trend buffers and alerting webhooks.
@@ -492,6 +493,13 @@ func (g *GeoConfig) Validate() error {
 	if !g.Enabled {
 		return nil
 	}
+	language := strings.TrimSpace(g.MMDBNameLanguage)
+	if language != "" {
+		if !geoNameLanguageRe.MatchString(language) {
+			return fieldErr("geo.mmdb_name_language", "must be a BCP-47-style language tag such as zh-CN, got %q", language)
+		}
+		g.MMDBNameLanguage = language
+	}
 	if g.CacheTTL < model.D(time.Minute) || g.CacheTTL > model.D(time.Hour*24*30) {
 		return fieldErr("geo.cache_ttl", "must be between 1m and 720h")
 	}
@@ -649,6 +657,9 @@ var (
 	bcryptHashRe = regexp.MustCompile(`^\$2[aby]\$[0-9]{2}\$[./A-Za-z0-9]{53}$`)
 	argonHashRe  = regexp.MustCompile(`^\$argon2id\$v=19\$m=[0-9]+,t=[0-9]+,p=[0-9]+\$[A-Za-z0-9+/]+\$[A-Za-z0-9+/]+$`)
 	totpSecretRe = regexp.MustCompile(`^[A-Z2-7]{16,64}$`)
+	// geoNameLanguageRe accepts BCP-47-style tags such as en, zh-CN, pt-BR and
+	// zh-Hans. The MMDB reader compares tags case-insensitively.
+	geoNameLanguageRe = regexp.MustCompile(`^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$`)
 )
 
 // ValidPasswordHash reports whether hash looks like argon2id or bcrypt output.

@@ -16,7 +16,7 @@ func TestGeoFromMMDBMapMaxMindLayout(t *testing.T) {
 		"autonomous_system_organization": "Google LLC",
 		"isp":                            "Google LLC",
 	}
-	geo, hits, err := geoFromMMDBMap(record)
+	geo, hits, err := geoFromMMDBMap(record, "en")
 	if err != nil {
 		t.Fatalf("geoFromMMDBMap: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestGeoFromMMDBMapIPLocateLayout(t *testing.T) {
 		"country_code":   "US",
 		"continent_code": "NA",
 	}
-	geo, hits, err := geoFromMMDBMap(record)
+	geo, hits, err := geoFromMMDBMap(record, "en")
 	if err != nil {
 		t.Fatalf("geoFromMMDBMap: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestGeoFromMMDBMapFlatLayout(t *testing.T) {
 		"as_name": "Deutsche Telekom AG",
 		"isp":     "Deutsche Telekom",
 	}
-	geo, hits, err := geoFromMMDBMap(record)
+	geo, hits, err := geoFromMMDBMap(record, "en")
 	if err != nil {
 		t.Fatalf("geoFromMMDBMap: %v", err)
 	}
@@ -92,11 +92,73 @@ func TestGeoFromMMDBMapFlatLayout(t *testing.T) {
 }
 
 func TestGeoFromMMDBMapCountryNameOnly(t *testing.T) {
-	geo, _, err := geoFromMMDBMap(map[string]any{"country": "United States"})
+	geo, _, err := geoFromMMDBMap(map[string]any{"country": "United States"}, "en")
 	if err != nil {
 		t.Fatalf("geoFromMMDBMap: %v", err)
 	}
 	if geo.Country != "" {
 		t.Fatalf("full country name must not be treated as ISO code: %+v", geo)
+	}
+}
+
+func TestGeoFromMMDBMapLocalizedNames(t *testing.T) {
+	record := map[string]any{
+		"country": map[string]any{"iso_code": "CN"},
+		"city": map[string]any{"names": map[string]any{
+			"en":    "Nanjing",
+			"zh-CN": "南京",
+		}},
+		"subdivisions": []any{
+			map[string]any{"names": map[string]any{
+				"en":    "Jiangsu",
+				"zh-CN": "江苏",
+			}},
+		},
+	}
+
+	geo, hits, err := geoFromMMDBMap(record, "zh-CN")
+	if err != nil {
+		t.Fatalf("geoFromMMDBMap: %v", err)
+	}
+	if geo.City != "南京" || geo.Region != "江苏" {
+		t.Fatalf("localized geo = %+v, want 南京/江苏", geo)
+	}
+	if hits[geoFieldCity] != "city.names.zh-CN" || hits[geoFieldRegion] != "subdivisions[0].names.zh-CN" {
+		t.Fatalf("unexpected localized hit paths: %+v", hits)
+	}
+
+	// Requesting a missing language must fall back to English.
+	geo, hits, err = geoFromMMDBMap(record, "ja")
+	if err != nil {
+		t.Fatalf("geoFromMMDBMap: %v", err)
+	}
+	if geo.City != "Nanjing" || geo.Region != "Jiangsu" {
+		t.Fatalf("fallback geo = %+v, want English fallback", geo)
+	}
+	if hits[geoFieldCity] != "city.names.en" {
+		t.Fatalf("fallback city path = %q, want city.names.en", hits[geoFieldCity])
+	}
+}
+
+func TestGeoFromMMDBMapNestedASN(t *testing.T) {
+	record := map[string]any{
+		"asn": map[string]any{
+			"autonomous_system_number":       uint64(15169),
+			"autonomous_system_organization": "Google LLC",
+			"as_domain":                      "google.com",
+		},
+	}
+	geo, hits, err := geoFromMMDBMap(record, "en")
+	if err != nil {
+		t.Fatalf("geoFromMMDBMap: %v", err)
+	}
+	if geo.ASN != 15169 || geo.ASNOrg != "Google LLC" {
+		t.Fatalf("nested ASN geo = %+v, want AS15169/Google LLC", geo)
+	}
+	if hits[geoFieldASN] != "asn.autonomous_system_number" {
+		t.Fatalf("ASN path = %q", hits[geoFieldASN])
+	}
+	if hits[geoFieldASNOrg] != "asn.autonomous_system_organization" {
+		t.Fatalf("ASN org path = %q", hits[geoFieldASNOrg])
 	}
 }

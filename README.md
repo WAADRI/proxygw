@@ -126,6 +126,7 @@ NP_LOG_LEVEL=debug \
 | `admin.totp_secret` | 空 | 可选 TOTP 二次验证（base32） |
 | `settings.*` | 见示例 | 运行设置默认值，面板修改后写入 `runtime-overrides.json` 覆盖 |
 | `geo.*` | 见示例 | 出口 IP 回声、MMDB、provider、隐私开关、缓存/限流 |
+| `geo.mmdb_name_language` | `en` | MMDB 城市/地区名称优先语言，如 `zh-CN`；缺失回退英文 |
 | `observability.webhook_url` | 空 | 告警 Webhook（节点离线/错误率/证书或 GeoIP 临近过期） |
 
 面板域名限制示例（启用后，用 IP 或其它域名访问面板会直接断开，不返回任何 HTTP 内容）：
@@ -246,7 +247,9 @@ server:
 - 出口 IP 优先级：节点手工 `egress.manual_v4/v6` > 服务端看到的隧道对端地址 > 节点请求 https IP 回声端点（IPv4/IPv6 分别探测，2s 超时，失败降级）。IP 回声端点只做固定规则提取（纯文本第一个合法 IP / JSON `ip` 字段 / cloudflare trace `ip=` 行），无需配置映射。
 - 「IP 回声」与「归属地查询」是两个独立配置项；归属地查询采用三层 provider，**禁止自动嗅探响应格式**：
   - `preset`：内置适配器 `ipinfo` / `ip-api` / `ipwho.is` / `cloudflare` / 本地 MMDB；
-  - 本地 MMDB 同时兼容 **MaxMind GeoLite2/GeoIP2 嵌套结构** 和 **IPinfo Lite / IPLocate 等扁平结构**（如 `country` 为国家全名、`country_code` 为 ISO 代码、`asn` 为 `AS15169`）；单个字段类型不符不会再让整条 lookup 失败；
+  - 本地 MMDB 同时兼容 **MaxMind GeoLite2/GeoIP2 嵌套结构**、**IPinfo Lite / IPLocate 等扁平结构**（如 `country` 为国家全名、`country_code` 为 ISO 代码、`asn` 为 `AS15169`）以及 **Merged-IP 的嵌套 `asn` 对象**；单个字段类型不符不会再让整条 lookup 失败；
+  - 城市/地区名称语言由 `geo.mmdb_name_language` 控制（如 `zh-CN`，缺失时回退英文）；国家显示仍由 ISO 代码在前端映射中文；
+  - **纯真 qqwry.ipdb 是 IPDB 格式，不能直接作为 MMDB 使用**；需要中文城市/ASN 时建议用 Merged-IP.mmdb（GeoLite2 + IPinfo + DB-IP + QQWry 合并，含中文名称与 ASN）；
   - `template`：URL + 声明式字段映射，支持 `$.data.country` 形式的嵌套路径/数组下标，纯文本可用 `regex:country=([A-Z]{2})`；
   - `schema`：用户端点返回项目标准 JSON：`{"country":"JP","region":"Tokyo","city":"Tokyo","asn":2516,"asn_org":"KDDI","isp":"KDDI"}`。
   - 路径解析失败/字段缺失会报明确配置错误（面板可见、可测试），不静默返回空值。
@@ -438,6 +441,7 @@ go test ./internal/integration/ -v   # 进程内端到端集成测试
 | 面板登录被锁 | 等待 `admin.login_lock_window` 或重启清空内存限速计数 |
 | 归属地 unknown | 未配置 MMDB 且未开启远程 provider；检查 `geo.remote_consent`、provider 测试按钮的原始响应与路径 |
 | MMDB 报 `cannot unmarshal ... into struct` | 数据库是扁平 schema（如 IPinfo Lite/IPLocate：`country` 为国家全名、`country_code` 为 ISO 码），升级到支持扁平 MMDB 的版本即可；仍可用 MaxMind GeoLite2/GeoIP2 |
+| MMDB 文件无法加载：`invalid MaxMind DB file` | 该文件是 IPDB/IP2Location 等其它格式（例如纯真 `qqwry.ipdb`），不是 MMDB；需转换成 MMDB 或使用 Merged-IP 等 MMDB 数据源 |
 | 出口 IP 重复 | 面板「独立出口 IP 数」与 `duplicate_of` 标记；同一 NAT 后的多节点属正常 |
 | 大文件传输失败 | 检查空闲/写超时、节点带宽限制、`window_stall` 日志；用面板拨测节点连通性 |
 | 服务端启动失败 | 私钥权限过宽（0644）、ca 证书文件缺失、弱令牌未显式确认、端口占用、配置字段校验错误（错误信息含字段名与期望值） |

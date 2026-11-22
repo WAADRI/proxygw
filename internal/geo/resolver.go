@@ -204,7 +204,7 @@ func (r *Resolver) initMMDB() {
 	if len(names) == 0 {
 		names = []string{presetMMDB}
 	}
-	layer := newMMDBLayer(path, names, priority)
+	layer := newMMDBLayer(path, names, priority, r.cfg.MMDBNameLanguage)
 	r.mmdb = layer
 	if _, healthy, _, lastErr := layer.statusSnapshot(); !healthy {
 		r.log.Warn("geo: MMDB 不可用，归属地将回退到在线 provider 或显示 unknown（服务继续启动）", "path", path, "error", lastErr)
