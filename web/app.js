@@ -3031,15 +3031,12 @@
     }).catch(function (err) {
       var form = $('settings-form');
       if (form) form.replaceChildren(el('p', 'form-alert', '运行设置加载失败：' + ((err && err.message) || '未知错误')));
-      var rulesForm = $('rules-settings-form');
-      if (rulesForm) rulesForm.replaceChildren(el('p', 'form-alert', '运行设置加载失败：' + ((err && err.message) || '未知错误')));
       showApiError(err);
     });
   }
 
   function applySettingsData(data) {
     state.settings = data || null;
-    renderSettingsForm($('rules-settings-form'));
     renderSettingsForm($('settings-form'));
     updateSettingsLabels();
     renderSettingsHistory();
@@ -3171,13 +3168,13 @@
     tbody.replaceChildren(frag);
   }
 
-  function saveSettings(scope) {
+  function saveSettings() {
     if (!state.settings) {
       showApiError(new ApiError('internal_error', '运行设置尚未加载，请刷新页面后重试', 0, null));
       return Promise.resolve();
     }
-    var container = scope === 'rules' ? $('rules-settings-form') : $('settings-form');
-    var button = qs('[data-action="settings-save"][data-scope="' + scope + '"]');
+    var container = $('settings-form');
+    var button = qs('[data-action="settings-save"]');
     var payload;
     try {
       payload = collectSettings(container);
@@ -3204,12 +3201,12 @@
       });
   }
 
-  function settingsAction(action, scope) {
+  function settingsAction(action) {
     if (!state.settings) {
       showApiError(new ApiError('internal_error', '运行设置尚未加载，请刷新页面后重试', 0, null));
       return;
     }
-    var button = qs('[data-action="settings-' + action + '"][data-scope="' + scope + '"]');
+    var button = qs('[data-action="settings-' + action + '"]');
     var path = action === 'undo' ? '/settings/undo' : '/settings/reset';
     var run = function () {
       setBusy(button, true, action === 'undo' ? '撤销中…' : '恢复中…');
@@ -4256,9 +4253,9 @@
     'audit-detail': function (target) { toggleAuditDetail(target.dataset.id); },
     'audit-load-more': function () { loadAudit({ append: true }); },
     'audit-clear': function () { clearAuditFilters(); },
-    'settings-save': function (target) { saveSettings(target.dataset.scope || 'settings'); },
-    'settings-undo': function (target) { settingsAction('undo', target.dataset.scope || 'settings'); },
-    'settings-reset': function (target) { settingsAction('reset', target.dataset.scope || 'settings'); },
+    'settings-save': function () { saveSettings(); },
+    'settings-undo': function () { settingsAction('undo'); },
+    'settings-reset': function () { settingsAction('reset'); },
     'cert-rotate': function () { rotateCertPin(); },
     'cert-reload': function () { reloadCert(); },
     'cert-install': function () { openInstallTemplateModal(); },

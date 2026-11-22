@@ -113,7 +113,7 @@ settings:
 
 geo:
   enabled: true
-  mmdb_path: ""        # 本地 MMDB 文件路径（可选；缺失时仅用在线 provider 并告警）
+  mmdb_path: ""        # 本地 MMDB 文件路径（可选；支持 MaxMind GeoLite2/GeoIP2 与 IPinfo Lite/IPLocate 等扁平库）
   cache_ttl: 24h
   remote_consent: false # 启用在线 provider 必须显式设为 true（会把节点 IP 发给第三方）
   max_concurrent: 4

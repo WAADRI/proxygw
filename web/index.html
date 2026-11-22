@@ -308,7 +308,7 @@
       <header class="page-head">
         <div>
           <h2>连接与规则</h2>
-          <p class="page-sub">路由/粘性/熔断/限流热设置、粘性黑名单、ACL 与强制默认拒绝</p>
+          <p class="page-sub">粘性黑名单、ACL 与强制默认拒绝；路由/限流/超时等运行时参数统一在「运行设置」页调整</p>
         </div>
       </header>
 
@@ -317,12 +317,9 @@
           <h3>路由与运行时设置</h3>
           <span class="muted small" id="rules-settings-version"></span>
         </div>
-        <p class="muted small">修改保存后立即热生效并持久化；非法值会被服务端拒绝且保留旧值。</p>
-        <form id="rules-settings-form" class="settings-form" novalidate></form>
+        <p class="muted small">调度策略、粘性、熔断、重试、限流、超时与压缩属于运行设置，统一在「运行设置」页修改，避免两处表单重复。</p>
         <div class="form-actions form-actions-bar">
-          <button type="button" class="btn btn-primary" data-action="settings-save" data-scope="rules">保存设置</button>
-          <button type="button" class="btn btn-ghost" data-action="settings-undo" data-scope="rules">撤销上次修改</button>
-          <button type="button" class="btn btn-danger-ghost" data-action="settings-reset" data-scope="rules">恢复默认</button>
+          <button type="button" class="btn btn-primary" data-action="nav" data-page="settings">前往运行设置</button>
         </div>
       </article>
 
@@ -430,9 +427,9 @@
           <div class="card-head"><h3>当前设置</h3><span id="settings-meta" class="muted small"></span></div>
           <form id="settings-form" class="settings-form" novalidate></form>
           <div class="form-actions form-actions-bar">
-            <button type="button" class="btn btn-primary" data-action="settings-save" data-scope="settings">保存设置</button>
-            <button type="button" class="btn btn-ghost" data-action="settings-undo" data-scope="settings">撤销上次修改</button>
-            <button type="button" class="btn btn-danger-ghost" data-action="settings-reset" data-scope="settings">恢复默认</button>
+            <button type="button" class="btn btn-primary" data-action="settings-save">保存设置</button>
+            <button type="button" class="btn btn-ghost" data-action="settings-undo">撤销上次修改</button>
+            <button type="button" class="btn btn-danger-ghost" data-action="settings-reset">恢复默认</button>
           </div>
         </article>
 

@@ -235,7 +235,7 @@ server:
 ## 管理面板
 
 - 登录：用户名/密码（argon2id 哈希），成功后签发 JWT（HttpOnly + Secure + SameSite Cookie）；登录失败按 IP 限速与锁定；可选 TOTP。
-- 页面：总览（在线节点数 / 独立出口 IP 数 / 活跃连接数 + 趋势 sparkline）、节点、节点组、凭据、规则（路由策略/粘性/黑名单/ACL/熔断/限流/超时/压缩）、运行设置、审计、节点接入。
+- 页面：总览（在线节点数 / 独立出口 IP 数 / 活跃连接数 + 趋势 sparkline）、节点、节点组、凭据、连接与规则（粘性黑名单、ACL、强制默认拒绝）、运行设置（调度/粘性/熔断/重试/限流/超时/压缩/默认 ACL 动作）、审计、节点接入。
 - 实时性：SSE 推送 + 3s 轮询兜底。
 - 运行设置热生效并持久化到 `runtime-overrides.json`，重启后覆盖配置文件；非法配置被拒绝且保留旧值；支持「撤销上次修改」。
 - 节点拨测：单节点 Ping（隧道 RTT）/ TCPing / HTTP GET / DNS，结果写审计。
@@ -246,6 +246,7 @@ server:
 - 出口 IP 优先级：节点手工 `egress.manual_v4/v6` > 服务端看到的隧道对端地址 > 节点请求 https IP 回声端点（IPv4/IPv6 分别探测，2s 超时，失败降级）。IP 回声端点只做固定规则提取（纯文本第一个合法 IP / JSON `ip` 字段 / cloudflare trace `ip=` 行），无需配置映射。
 - 「IP 回声」与「归属地查询」是两个独立配置项；归属地查询采用三层 provider，**禁止自动嗅探响应格式**：
   - `preset`：内置适配器 `ipinfo` / `ip-api` / `ipwho.is` / `cloudflare` / 本地 MMDB；
+  - 本地 MMDB 同时兼容 **MaxMind GeoLite2/GeoIP2 嵌套结构** 和 **IPinfo Lite / IPLocate 等扁平结构**（如 `country` 为国家全名、`country_code` 为 ISO 代码、`asn` 为 `AS15169`）；单个字段类型不符不会再让整条 lookup 失败；
   - `template`：URL + 声明式字段映射，支持 `$.data.country` 形式的嵌套路径/数组下标，纯文本可用 `regex:country=([A-Z]{2})`；
   - `schema`：用户端点返回项目标准 JSON：`{"country":"JP","region":"Tokyo","city":"Tokyo","asn":2516,"asn_org":"KDDI","isp":"KDDI"}`。
   - 路径解析失败/字段缺失会报明确配置错误（面板可见、可测试），不静默返回空值。
@@ -436,6 +437,7 @@ go test ./internal/integration/ -v   # 进程内端到端集成测试
 | 面板打不开 | 自签证书浏览器告警是预期；确认 443/tcp 放行；`curl -k https://IP/healthz` |
 | 面板登录被锁 | 等待 `admin.login_lock_window` 或重启清空内存限速计数 |
 | 归属地 unknown | 未配置 MMDB 且未开启远程 provider；检查 `geo.remote_consent`、provider 测试按钮的原始响应与路径 |
+| MMDB 报 `cannot unmarshal ... into struct` | 数据库是扁平 schema（如 IPinfo Lite/IPLocate：`country` 为国家全名、`country_code` 为 ISO 码），升级到支持扁平 MMDB 的版本即可；仍可用 MaxMind GeoLite2/GeoIP2 |
 | 出口 IP 重复 | 面板「独立出口 IP 数」与 `duplicate_of` 标记；同一 NAT 后的多节点属正常 |
 | 大文件传输失败 | 检查空闲/写超时、节点带宽限制、`window_stall` 日志；用面板拨测节点连通性 |
 | 服务端启动失败 | 私钥权限过宽（0644）、ca 证书文件缺失、弱令牌未显式确认、端口占用、配置字段校验错误（错误信息含字段名与期望值） |

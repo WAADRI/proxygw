@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"sort"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/oschwald/maxminddb-golang"
@@ -12,27 +15,20 @@ import (
 	"proxygw/internal/model"
 )
 
-// mmdbRecord is the subset of the MaxMind GeoLite2 City/Country/ASN record used
-// by this package. Missing fields are simply left zero; the MMDB layer is the
-// primary source and online providers may fill the gaps.
-type mmdbRecord struct {
-	Country struct {
-		ISOCode string `maxminddb:"iso_code"`
-	} `maxminddb:"country"`
-	RegisteredCountry struct {
-		ISOCode string `maxminddb:"iso_code"`
-	} `maxminddb:"registered_country"`
-	Subdivisions []struct {
-		Name    string `maxminddb:"name"`
-		ISOCode string `maxminddb:"iso_code"`
-	} `maxminddb:"subdivisions"`
-	City struct {
-		Name string `maxminddb:"name"`
-	} `maxminddb:"city"`
-	ASN    uint   `maxminddb:"autonomous_system_number"`
-	ASNOrg string `maxminddb:"autonomous_system_organization"`
-	ISP    string `maxminddb:"isp"`
-}
+// The local MMDB layer accepts both the nested MaxMind GeoLite2/GeoIP2 layout
+// and the flat layouts used by several compatible providers (for example
+// IPLocate, whose "country" field is the full country name and whose
+// "country_code" field carries the ISO code). Records are decoded into a
+// generic map instead of a rigid struct so a single unexpected field type can
+// never make the whole lookup fail.
+//
+// Example shapes handled:
+//
+//	MaxMind:  {"country":{"iso_code":"US"}, "city":{"names":{"en":"..."}}}
+//	IPLocate: {"country":"United States", "country_code":"US"}
+//	DB-IP:    {"country":"DE", "region":"Berlin", "city":"Berlin"}
+//
+// Missing or unexpected fields are ignored, not guessed.
 
 // mmdbLayer is the local MaxMind DB primary geolocation layer. A missing or
 // corrupt database is not fatal: the layer is kept with loadErr set so the panel
@@ -127,53 +123,217 @@ func (m *mmdbLayer) lookup(ip net.IP) (model.Geo, map[string]string, error) {
 		}
 		return model.Geo{}, nil, errors.New("mmdb unavailable")
 	}
-	var record mmdbRecord
+	var record map[string]any
 	if err := reader.Lookup(ip, &record); err != nil {
 		return model.Geo{}, nil, fmt.Errorf("mmdb lookup %s: %w", ip, err)
 	}
-	return geoFromMMDBRecord(record)
+	return geoFromMMDBMap(record)
 }
 
-// geoFromMMDBRecord maps a decoded MMDB record to the normalized Geo model.
-func geoFromMMDBRecord(record mmdbRecord) (model.Geo, map[string]string, error) {
+// geoFromMMDBMap maps a decoded MMDB record to the normalized Geo model.
+func geoFromMMDBMap(record map[string]any) (model.Geo, map[string]string, error) {
 	geo := model.Geo{}
 	hitPaths := map[string]string{}
-	country := record.Country.ISOCode
-	if country == "" {
-		country = record.RegisteredCountry.ISOCode
-	}
-	if country != "" {
+	if country, path := mmdbCountry(record); country != "" {
 		geo.Country = country
-		hitPaths[geoFieldCountry] = "country.iso_code"
+		hitPaths[geoFieldCountry] = path
 	}
-	if len(record.Subdivisions) > 0 {
-		subdivision := record.Subdivisions[0]
-		region := subdivision.Name
-		if region == "" {
-			region = subdivision.ISOCode
-		}
-		if region != "" {
-			geo.Region = region
-			hitPaths[geoFieldRegion] = "subdivisions[0].name"
-		}
+	if region, path := mmdbRegion(record); region != "" {
+		geo.Region = region
+		hitPaths[geoFieldRegion] = path
 	}
-	if record.City.Name != "" {
-		geo.City = record.City.Name
-		hitPaths[geoFieldCity] = "city.name"
+	if city, path := mmdbCity(record); city != "" {
+		geo.City = city
+		hitPaths[geoFieldCity] = path
 	}
-	if record.ASN > 0 && record.ASN <= math.MaxInt32 {
-		geo.ASN = int(record.ASN)
-		hitPaths[geoFieldASN] = "autonomous_system_number"
+	if asn, path := mmdbASN(record); asn > 0 {
+		geo.ASN = asn
+		hitPaths[geoFieldASN] = path
 	}
-	if record.ASNOrg != "" {
-		geo.ASNOrg = record.ASNOrg
-		hitPaths[geoFieldASNOrg] = "autonomous_system_organization"
+	if org, path := mmdbTextFrom(record,
+		"autonomous_system_organization", "as_name", "as_org", "organization", "org"); org != "" {
+		geo.ASNOrg = org
+		hitPaths[geoFieldASNOrg] = path
 	}
-	if record.ISP != "" {
-		geo.ISP = record.ISP
-		hitPaths[geoFieldISP] = "isp"
+	if isp, path := mmdbTextFrom(record, "isp"); isp != "" {
+		geo.ISP = isp
+		hitPaths[geoFieldISP] = path
 	}
 	return normalizeGeoFields(geo), hitPaths, nil
+}
+
+// mmdbCountry extracts the ISO 3166-1 alpha-2 country code.
+func mmdbCountry(record map[string]any) (string, string) {
+	if country := mmdbMap(record["country"]); country != nil {
+		for _, key := range []string{"iso_code", "code"} {
+			if code := mmdbCountryCode(mmdbText(country[key])); code != "" {
+				return code, "country." + key
+			}
+		}
+	}
+	if code := mmdbCountryCode(mmdbText(record["country"])); code != "" {
+		return code, "country"
+	}
+	for _, key := range []string{"country_code", "countryCode", "country_iso_code", "iso_code"} {
+		if code := mmdbCountryCode(mmdbText(record[key])); code != "" {
+			return code, key
+		}
+	}
+	if country := mmdbMap(record["registered_country"]); country != nil {
+		for _, key := range []string{"iso_code", "code"} {
+			if code := mmdbCountryCode(mmdbText(country[key])); code != "" {
+				return code, "registered_country." + key
+			}
+		}
+	}
+	return "", ""
+}
+
+// mmdbRegion extracts the most specific first-level region name.
+func mmdbRegion(record map[string]any) (string, string) {
+	if items, ok := record["subdivisions"].([]any); ok && len(items) > 0 {
+		if subdivision := mmdbMap(items[0]); subdivision != nil {
+			if name, suffix := mmdbNameFromObject(subdivision); name != "" {
+				return name, "subdivisions[0]." + suffix
+			}
+			if code := mmdbText(subdivision["iso_code"]); code != "" {
+				return code, "subdivisions[0].iso_code"
+			}
+		}
+	}
+	if subdivision := mmdbMap(record["subdivision"]); subdivision != nil {
+		if name, suffix := mmdbNameFromObject(subdivision); name != "" {
+			return name, "subdivision." + suffix
+		}
+	}
+	return mmdbTextFrom(record, "region", "region_name", "region_code", "state", "state_name")
+}
+
+// mmdbCity extracts the city name.
+func mmdbCity(record map[string]any) (string, string) {
+	if city := mmdbMap(record["city"]); city != nil {
+		if name, suffix := mmdbNameFromObject(city); name != "" {
+			return name, "city." + suffix
+		}
+	}
+	if city := mmdbText(record["city"]); city != "" {
+		return city, "city"
+	}
+	return mmdbTextFrom(record, "city_name", "cityName")
+}
+
+// mmdbASN extracts the integer ASN from numeric or "AS123" style values.
+func mmdbASN(record map[string]any) (int, string) {
+	for _, key := range []string{"autonomous_system_number", "asn", "as_number"} {
+		value, ok := record[key]
+		if !ok {
+			continue
+		}
+		if asn, ok := mmdbUint(value); ok && asn > 0 && asn <= math.MaxInt32 {
+			return int(asn), key
+		}
+		text := strings.TrimPrefix(strings.ToUpper(strings.TrimSpace(mmdbText(value))), "AS")
+		if text == "" {
+			continue
+		}
+		asn, err := strconv.ParseUint(text, 10, 32)
+		if err == nil && asn > 0 && asn <= math.MaxInt32 {
+			return int(asn), key
+		}
+	}
+	return 0, ""
+}
+
+// mmdbTextFrom returns the first non-empty string field and its key.
+func mmdbTextFrom(record map[string]any, keys ...string) (string, string) {
+	for _, key := range keys {
+		if text := mmdbText(record[key]); text != "" {
+			return text, key
+		}
+	}
+	return "", ""
+}
+
+// mmdbNameFromObject extracts an English (or first available) localized name
+// from a MaxMind "names" object, falling back to a top-level "name" field.
+func mmdbNameFromObject(object map[string]any) (string, string) {
+	if names := mmdbMap(object["names"]); names != nil {
+		if name := mmdbText(names["en"]); name != "" {
+			return name, "names.en"
+		}
+		keys := make([]string, 0, len(names))
+		for key := range names {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			if name := mmdbText(names[key]); name != "" {
+				return name, "names." + key
+			}
+		}
+	}
+	if name := mmdbText(object["name"]); name != "" {
+		return name, "name"
+	}
+	return "", ""
+}
+
+func mmdbMap(value any) map[string]any {
+	object, _ := value.(map[string]any)
+	return object
+}
+
+func mmdbText(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func mmdbUint(value any) (uint64, bool) {
+	switch number := value.(type) {
+	case uint:
+		return uint64(number), true
+	case uint8:
+		return uint64(number), true
+	case uint16:
+		return uint64(number), true
+	case uint32:
+		return uint64(number), true
+	case uint64:
+		return number, true
+	case int:
+		if number >= 0 {
+			return uint64(number), true
+		}
+	case int8:
+		if number >= 0 {
+			return uint64(number), true
+		}
+	case int16:
+		if number >= 0 {
+			return uint64(number), true
+		}
+	case int32:
+		if number >= 0 {
+			return uint64(number), true
+		}
+	case int64:
+		if number >= 0 {
+			return uint64(number), true
+		}
+	case float64:
+		if number >= 0 && number <= math.MaxUint32 && number == math.Trunc(number) {
+			return uint64(number), true
+		}
+	}
+	return 0, false
+}
+
+func mmdbCountryCode(raw string) string {
+	code := strings.ToUpper(strings.TrimSpace(raw))
+	if len(code) != 2 || code[0] < 'A' || code[0] > 'Z' || code[1] < 'A' || code[1] > 'Z' {
+		return ""
+	}
+	return code
 }
 
 // statusSnapshot returns the panel-visible state of the MMDB layer.
@@ -217,6 +377,9 @@ func (m *mmdbLayer) setEnabled(enabled bool) error {
 	if err != nil {
 		m.loadErr = fmt.Errorf("open %s: %w", path, err)
 		return nil
+	}
+	if m.reader != nil {
+		_ = m.reader.Close()
 	}
 	m.reader = reader
 	m.loadErr = nil
