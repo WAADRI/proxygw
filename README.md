@@ -157,6 +157,47 @@ server:
 
 > 服务端优雅停机（`docker stop/restart`、`systemctl stop`、升级重启等）会向节点发送 `KICK(shutdown)`。客户端收到后排空在途流，**保持进程运行**，5 秒后重建 agent 自动重连；只有本地 `SIGTERM/SIGINT`、令牌/证书等致命错误才会退出。因此直接以二进制运行（无 systemd/Docker restart 策略）也能在服务端重启后自动恢复。
 
+### 自动更新（可选，默认关闭）
+
+两个二进制都支持从 GitHub Release 检查和下载更新，并支持 GitHub 访问不通时走代理前缀（如 `https://gh-proxy.com`、`https://ghproxy.net`）。
+
+命令行模式（不需要配置文件）：
+
+```bash
+./proxygw-client -update-check   # 只检查，不下载
+./proxygw-client -update         # 下载、校验 SHA256 并替换当前二进制
+```
+
+替换后当前进程仍运行旧版本，需要重启服务/容器后生效。建议在维护窗口执行：
+
+```bash
+systemctl stop proxygw-client
+./proxygw-client -update
+systemctl start proxygw-client
+```
+
+后台自动检查通过环境变量开启：
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `UPDATE_ENABLED` | false | 开启后台定时检查 |
+| `UPDATE_AUTO_APPLY` | false | 发现新版本时自动下载并替换二进制（不自动重启） |
+| `UPDATE_INTERVAL` | `24h` | 检查间隔，最小 1 分钟 |
+| `UPDATE_CHECK_DELAY` | `1m` | 启动后首次检查延迟 |
+| `UPDATE_REPOSITORY` | `WAADRI/proxygw` | GitHub 仓库 |
+| `UPDATE_PROXIES` | `https://gh-proxy.com,https://ghproxy.net` | 代理前缀列表，逗号分隔；会依次回退 |
+| `UPDATE_GITHUB_TOKEN` | 空 | 可选 GitHub token，仅用于降低 API 限流 |
+
+代理前缀也支持 `{url}` 占位符，例如：
+
+```bash
+UPDATE_PROXIES='https://gh-proxy.com/{url}'
+```
+
+更新流程会校验 Release 的 `.sha256` 后才替换文件；如果 GitHub API 不可用，会自动回退到各代理的 `/releases/latest` 重定向。代理本身仍属于第三方，请确保使用可信代理；生产环境建议只在维护窗口手动 `-update`，或使用 Docker 镜像/系统包更新。
+
+> Docker 部署请继续通过镜像 tag 更新，不建议在容器内开启自动更新：容器内替换的二进制不会持久化到镜像，重建容器后会丢失。
+
 ## 隧道协议
 
 ### WebSocket 帧

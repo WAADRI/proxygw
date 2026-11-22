@@ -18,6 +18,7 @@ import (
 	"proxygw/internal/config"
 	"proxygw/internal/logx"
 	"proxygw/internal/nodeagent"
+	"proxygw/internal/updater"
 	"proxygw/internal/version"
 )
 
@@ -38,12 +39,18 @@ func run() int {
 		configPath  = flag.String("config", "config.client.yaml", "节点配置文件路径")
 		showVersion = flag.Bool("version", false, "打印版本信息后退出")
 		checkOnly   = flag.Bool("check-config", false, "仅校验配置后退出")
+		updateCheck = flag.Bool("update-check", false, "仅检查 GitHub 是否有新版本")
+		updateNow   = flag.Bool("update", false, "下载并安装最新版本后退出（需手动重启）")
 	)
 	flag.Parse()
 
 	if *showVersion {
 		writeJSON(version.Current())
 		return 0
+	}
+	if *updateCheck || *updateNow {
+		// Update mode must work before a client configuration exists.
+		return updater.HandleCLI("client", slog.Default(), version.Version, *updateCheck, *updateNow)
 	}
 
 	cfg, warnings, err := loadClientConfig(*configPath)
@@ -69,6 +76,7 @@ func run() int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	updater.StartBackground(ctx, "client", logger, version.Version)
 	return runClientLoop(ctx, logger, cfg, func() (clientSession, error) {
 		return app.NewClient(app.ClientOptions{Config: cfg, Logger: logger})
 	}, shutdownReconnectDelay)
