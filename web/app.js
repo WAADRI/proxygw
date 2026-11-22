@@ -1995,7 +1995,7 @@
       container.append(wrap);
     }).catch(function () {
       if (container) {
-        container.replaceChildren(el('p', 'muted small', 'TopN 统计暂不可用（M7 功能，后端未就绪时自动隐藏）。'));
+        container.replaceChildren(el('p', 'muted small', 'TopN 统计暂不可用（后端未就绪时自动隐藏）。'));
       }
     });
   }

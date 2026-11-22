@@ -429,7 +429,7 @@ func (a *Agent) dialTarget(ctx context.Context, network, addr string) (net.Conn,
 }
 
 // openErrorCode maps a node -> target dial error to the OPEN_ERR code table of
-// tunnel-state-machine.md chapter 7.
+// 状态机设计第 7 章。
 func openErrorCode(err error) protocol.OpenErrorCode {
 	if err == nil {
 		return protocol.CodeOK

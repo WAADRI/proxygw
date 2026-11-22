@@ -3,7 +3,7 @@
 // registration, aggregates planes into registry nodes, dispatches OPEN requests
 // and relays stream data.
 //
-// The session and stream lifecycles follow tunnel-state-machine.md exactly:
+// The session and stream lifecycles follow the state-machine design exactly:
 // chapter 2 session FSM (implemented with internal/fsm), chapter 3 stream FSM,
 // chapter 6 timeout table and chapter 7 error mapping. The circuit breaker
 // counters live in internal/sched; this package only exposes the raw counters
@@ -32,7 +32,7 @@ import (
 	"time"
 )
 
-// Fixed timeouts from the attachment (tunnel-state-machine.md chapter 6).
+// Fixed timeouts from the protocol design (state-machine chapter 6).
 const (
 	// DefaultHandshakeTimeout covers control stream acquisition and HELLO.
 	DefaultHandshakeTimeout = 10 * time.Second

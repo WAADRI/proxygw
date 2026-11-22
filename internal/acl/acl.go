@@ -1,5 +1,5 @@
 // Package acl implements the ordered access control engine and the built-in
-// forced deny list of proxygw (go-multi-node-proxy-prompt.md G.1/G.2).
+// forced deny list of proxygw (ACL design G.1/G.2).
 //
 // Evaluation order is fixed and cannot be changed by configuration:
 //

@@ -9,7 +9,7 @@ LDFLAGS := -s -w -X proxygw/internal/version.Version=$(VERSION) \
            -X proxygw/internal/version.Commit=$(COMMIT) \
            -X proxygw/internal/version.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build server client test race vet fmt tidy clean docker acceptance
+.PHONY: all build server client test race vet fmt tidy clean docker
 
 all: build
 
@@ -37,9 +37,6 @@ fmt:
 
 tidy:
 	go mod tidy
-
-acceptance:
-	pwsh -File scripts/acceptance.ps1
 
 docker:
 	docker build -f deploy/Dockerfile.server -t proxygw-server:$(VERSION) .

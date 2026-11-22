@@ -114,16 +114,16 @@ func TestTimingDefaults(t *testing.T) {
 		t.Fatalf("fallbackTimeout = %s, want 1s (from config)", tr.fallbackTimeout)
 	}
 	if tr.helloTimeout != HelloTimeout || tr.handshakeTimeout != HandshakeTimeout {
-		t.Fatalf("默认超时未对齐附件常量: %+v", tr)
+		t.Fatalf("默认超时未对齐协议常量: %+v", tr)
 	}
 	if tr.heartbeatInterval != HeartbeatInterval || tr.heartbeatMissLimit != HeartbeatMissLimit {
-		t.Fatal("心跳默认值与附件不一致")
+		t.Fatal("心跳默认值与协议规范不一致")
 	}
 	if tr.drainTimeout != DrainTimeout || tr.openDialTimeout != OpenDialTimeout {
-		t.Fatal("排空/拨号超时与附件不一致")
+		t.Fatal("排空/拨号超时与协议规范不一致")
 	}
 	if tr.reProbeInterval != ReProbeInterval || tr.backoffBase != BackoffBase || tr.backoffMax != BackoffMax {
-		t.Fatal("重探/退避默认值与附件不一致")
+		t.Fatal("重探/退避默认值与协议规范不一致")
 	}
 	// The fallback budget is clamped to the documented 1s-5s window.
 	cfg.QUICFallback = 0

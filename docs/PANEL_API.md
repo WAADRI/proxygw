@@ -105,7 +105,7 @@
 - `PATCH /geo/providers/{name}`：`{enabled:bool}` → 状态
 - `POST /geo/providers/{name}/test`：`{ip?}` → `{provider,ip,raw_snippet,result{...},duration_ms,hit_paths,error}`
 
-## 统计（M7）
+## 统计
 
 - `GET /stats/topn?window=15m&n=10` → `{windows:"15m", targets:[{target,count,bytes,errors}], nodes:[...], credentials:[...]}`
 

@@ -3,6 +3,12 @@ name: Build
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+      - "LICENSE"
+      - ".gitignore"
+      - ".dockerignore"
     tags: ["v*"]
   workflow_dispatch:
 

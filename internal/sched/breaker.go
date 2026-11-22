@@ -12,7 +12,7 @@ import (
 const defaultBreakerOpenTimeout = 30 * time.Second
 
 // breakerNode is the per-node circuit breaker state
-// (see tunnel-state-machine.md chapter 5).
+// (见状态机设计第 5 章)。
 type breakerNode struct {
 	state         string // closed | open | half_open
 	consecutive   int    // consecutive node-side failures while closed

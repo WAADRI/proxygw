@@ -1,6 +1,6 @@
 # internal/acl：访问控制与强制默认拒绝
 
-本包实现 `go-multi-node-proxy-prompt.md` G.1/G.2 的 ACL 引擎，被代理入口（HTTP/CONNECT/SOCKS5）
+本包实现 ACL 设计 G.1/G.2 的 ACL 引擎，被代理入口（HTTP/CONNECT/SOCKS5）
 与面板共用。只依赖标准库与 `internal/model`。
 
 ## 评估顺序（固定，不可配置）

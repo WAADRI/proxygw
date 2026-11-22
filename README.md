@@ -30,7 +30,7 @@
 
 | 领域 | 能力 |
 |---|---|
-| 传输层 | `Transport` 接口抽象；QUIC（默认主用）与 WebSocket 回退共享同一套流语义；同一端口 UDP/QUIC + TCP/wss；2s 回退与 1/2/4…10 分钟退避；多平面（默认 2，1–8）按哈希分流；会话/流状态机与附件超时表逐条对齐 |
+| 传输层 | `Transport` 接口抽象；QUIC（默认主用）与 WebSocket 回退共享同一套流语义；同一端口 UDP/QUIC + TCP/wss；2s 回退与 1/2/4…10 分钟退避；多平面（默认 2，1–8）按哈希分流；会话/流状态机与统一超时规范对齐 |
 | 代理入口 | HTTP absolute-form 普通转发、CONNECT、Upgrade/101 透传、keep-alive、分块传输；SOCKS5（RFC1928/1929，仅 CONNECT）；三入口共用同一条认证→授权→选点→建流→转发管线 |
 | 授权 | 凭据多套、argon2id、组绑定、fail-closed（组内无节点返回 503，绝不回退全部节点）、禁用/过期即时踢会话、来源 CIDR/协议/并发/带宽限制 |
 | 调度 | random / least_inflight / fastest / weighted(SWRR)；会话粘性（TTL 滑动、每节点 key 上限）；粘性黑名单（目标与节点两维度，优先级最高）；熔断 closed/open/half_open；令牌桶限流；响应首字节前透明重试一次 |
@@ -177,7 +177,7 @@ NP_LOG_LEVEL=debug \
 - 0-RTT 仅控制流；数据流等待握手确认后建立；开启 datagram 扩展预留 UDP 能力（本版不承载业务流量）；可选 qlog、拥塞控制可配（cubic/bbr 默认 cubic）。
 - 多平面：每节点 N 条 QUIC 连接，服务端按 trace id 哈希选平面。
 
-### 关键超时（附件为准）
+### 关键超时
 
 | 名称 | 默认 | 可配 |
 |---|---|---|
@@ -194,7 +194,7 @@ NP_LOG_LEVEL=debug \
 | 排空（draining） | 10s | 是 |
 | 流表清理 | 5s | 否 |
 
-### 错误码映射（附件第 7 章）
+### 错误码映射
 
 | 内部错误 | OPEN_ERR | HTTP | SOCKS5 |
 |---|---|---|---|
@@ -272,7 +272,7 @@ docker build -f deploy/Dockerfile.client \
   --build-arg GOPROXY=https://goproxy.cn,direct -t proxygw-client:1.0.4 .
 
 docker run -d --name proxygw-node-1 --restart unless-stopped \
-  -e SERVER_URL=https://node.proxy.waadri.top:443 \
+  -e SERVER_URL=https://gw.example.com:443 \
   -e AUTH_TOKEN='<节点接入令牌>' \
   -e CLIENT_ID=node-docker-1 -e TAGS='docker,test' \
   -e TRANSPORT=auto -e PLANES=2 -e TLS_MODE=ca \
@@ -323,7 +323,7 @@ sudo ./scripts/install-node.sh --server https://gw.example.com:443 \
 
 ## 设计决策与取舍
 
-1. **附件优先**：超时、错误码、状态机、并发不变量严格按《隧道层状态机与时序》实现；主规格与之冲突处以附件为准。组为空在 HTTP 侧必须 503（附件第 7 章注），SOCKS5 侧按主规格 C.4 回 `0x04 host unreachable`（附件表中同名「策略拒绝」用于 OPEN_ERR 策略码，本地无候选不产生 OPEN_ERR）。
+1. **协议规范统一**：超时、错误码、状态机与并发不变量严格按统一的隧道协议规范实现；组为空在 HTTP 侧返回 503，SOCKS5 侧返回 `0x04 host unreachable`（`CodePolicy` 仅用于 OPEN_ERR 策略码，本地无候选不产生 OPEN_ERR）。
 2. **OPEN 头/建流结果编码**：两条路径共享同一份 OPEN 元信息与结果格式；WebSocket 用 OPEN/OPEN_OK/OPEN_ERR 帧承载，QUIC 用原生流 + 长度前缀承载（流本身由 QUIC 分帧）。结果格式统一为 `code(1)|msg_len(2)|msg`，保证两路径外部行为一致。
 3. **面板、wss、QUIC 共端口**：默认 443 TCP（面板 HTTPS + wss 隧道）与 UDP 443（QUIC）；代理入口独立 8080/1080。面板路径 `/`，隧道升级路径 `/tunnel`。放在 nginx 后只能 wss（已在部署文档醒目说明）。
 4. **ACME**：不内置 ACME 客户端（需要域名商 DNS API 依赖，超出允许依赖与单二进制约束）；`ca` 模式 + 证书文件热重载可对接 certbot 等外部客户端，证书到期前 30 天面板/日志告警。`insecure` 仅回环/开发并强制告警。
@@ -360,10 +360,9 @@ internal/registry|nodesauth|auth|groups|rules|acl|sched|proxy|geo|probe
 internal/metrics|audit|settings|panel|health|identity|app|integration
 web/                      内嵌前端（embed.FS）
 deploy/                   Dockerfile/compose/systemd/Windows 服务
-scripts/                  一键接入、验收脚本
-docs/PLAN.md              实施计划与模块契约
+scripts/                  节点一键接入脚本
 docs/DOCKER_NODE.md       节点侧 Docker 部署指南（多节点/排障）
-docs/REMOTE_TEST_REPORT.md 远程真实服务器全功能测试报告
+docs/PANEL_API.md         管理面板 REST API 文档
 ```
 
 ## 第三方依赖
@@ -381,74 +380,21 @@ docs/REMOTE_TEST_REPORT.md 远程真实服务器全功能测试报告
 
 前端为原生 HTML/CSS/JS，构建时 `embed.FS` 内嵌；JSON 路径提取自研（不引额外依赖）。除配置文件外无外部运行时依赖，不依赖 Node.js、数据库、Redis。
 
-## 验收自测结果
+## 测试与 CI
 
-> 验收环境：Windows Server（Go 1.27.0，Windows amd64），另附 Linux 验收脚本 `scripts/acceptance.sh`（dash/bash，覆盖 SIGTERM 优雅停机等 Windows 不可测项）。
-> 详细逐条命令与输出见 `docs/ACCEPTANCE.md`；M2 只读审查问题处理见 `docs/REVIEW_M2_FIXES.md`。
+```bash
+go build ./...
+go vet ./...
+go test ./...
+go test -race ./...
+go test ./internal/integration/ -v   # 进程内端到端集成测试
+```
 
-### 1. 最终门禁（代码冻结时实测）
-
-| 命令 | 结果 |
-|---|---|
-| `gofmt -l .` | 无输出（全部已格式化） |
-| `go build ./...` | exit 0 |
-| `go vet ./...` | exit 0 |
-| `go test -race -count=1 ./...` | **28/28 包 ok**，0 fail；`internal/integration` 24.9s，其余包 1.4–9.0s |
-
-### 1b. 一键验收脚本（`scripts/acceptance.ps1` / `scripts/acceptance.sh`）
-
-| 脚本 | 环境 | 结果 | 耗时 |
-|---|---|---|---|
-| `scripts/acceptance.ps1` | Windows 11 / Windows PowerShell 5.1 / Go 1.27.0 | **PASS=16 FAIL=0 SKIP=1**，退出码 0 | 131.2s（2026-11-21 修复后复跑） |
-| `scripts/acceptance.sh` | Git Bash（Linux/macOS 为正式目标） | **PASS=16 FAIL=0 SKIP=1**，退出码 0 | 125s（2026-11-21 修复后复跑） |
-
-脚本覆盖：go vet/test/构建、双二进制启动、首启 pin/凭据/面板密码解析、QUIC 注册、HTTP/CONNECT/SOCKS5 三入口与错误口令、面板登录/CSRF/设置热更与回滚/非法设置 422、审计无明文密码、组隔离 fail-closed（停节点后 503 且不越组）、粘性与 TTL、QUIC→wss 回退、pin 不匹配硬失败、并发 20×64KB 与活跃连接归零。唯一 SKIP 为 Windows 无法发送 SIGTERM/Ctrl+C（`check 12`）；Linux/macOS 由 `.sh` 用 `kill -TERM` 断言优雅停机。本机无直连外网，外网项（PS7 安装、example.com、在线 geo provider）按「无外网即跳过」处理并已标注。
-
-### 1c. 远程真实服务器全功能测试（2026-11-21）
-
-在真实公网服务器（Ubuntu 26.04 / 2 vCPU / Let's Encrypt 证书）上完成部署与全功能测试，详见 **[docs/REMOTE_TEST_REPORT.md](docs/REMOTE_TEST_REPORT.md)**。摘要：
-
-- 部署：交叉编译 Linux 二进制 + systemd 单元，`443/tcp`（面板 HTTPS + wss）、`443/udp`（QUIC）、`8080`（HTTP 代理）、`1080`（SOCKS5），公共 CA 证书校验通过；
-- 拓扑：`node-a`/`node-b` 双节点 QUIC 双平面 + zstd，外加一次性公网 Windows 客户端验证 wss 回退与真实大文件转发；
-- 覆盖：三入口代理、认证/错误码、大文件/chunked/并发、压缩（1MiB 下载线上仅 +659B）、限速、IPv6 目标、组隔离 fail-closed、粘性、故障转移、节点 kick/禁用/拨测、面板全部页面与 API、设置热更/undo/reset、审计、指标、TopN、Geo provider、TOTP、PROXY protocol v2、mTLS、QUIC→wss 回退、SIGTERM 优雅停机排空、重启恢复——**约 91 项断言 0 FAIL**；
-- 公网 QUIC（云安全组放行 UDP 443 后补测）：外部 Windows 节点 2 条 QUIC 平面 64ms 建连；经其转发 1MiB 0.41s（~20.7 Mbit/s）、10MiB 0.70s（~119 Mbit/s）、POST 1MiB 0.51s、20 并发 64KiB 2.60s，多流分布两个平面；IPv6 字面量 QUIC 接入与拨测通过；空闲 45s 心跳保持、30×1MiB 连续传输 30/30 成功且无重连；同一条件下 wss 对照为 0.54s/0.77s/0.66s/3.16s，QUIC 全面更优；
-- 测试过程中发现并修复 4 个真实缺陷（KICK 帧丢失导致 60s 重连、HELLO_ACK 拒绝原因丢失导致错误令牌无限重试且无审计、`proxy_protocol` 配置未接线、overview `retries` 把失败当重试），均已补回归测试并重新部署复测通过；另有 3 项配置/文档建议（见远程报告第 5 节）。
-
-
-### 2. 进程内端到端集成测试（真实 server + node agent + QUIC/WS 传输，`-race` 通过）
-
-| 用例 | 覆盖 |
-|---|---|
-| `TestQUICPrimaryRegistration` | QUIC 主传输注册、双平面、epoch |
-| `TestWSFallbackWhenOnlyWebSocketEnabled` | 仅 wss 时回退成功 |
-| `TestQUICUDPBlackholedFallsBackToWS` | UDP 黑洞 2s 回退 wss |
-| `TestPinMismatchIsFatal` | pin 不匹配硬失败（不降级） |
-| `TestZstdCompressedProxy` | zstd 三方协商端到端：100KB 随机 POST 回显一致、~288KB 可压缩 POST、CONNECT+TLS、keep-alive 复用、线上字节远小于明文 |
-| `TestM3E2EProxyEntries` | HTTP GET/keep-alive 复用、POST 64KB 逐字节回显、chunked 响应、CONNECT+TLS、SOCKS5 用户名密码、认证失败（407/0xFF）、无认证模式 |
-| `TestM3E2EFailClosedGroupIsolation` | 组 g1 只含 node-a：10 次全经 node-a；cancel node-a 后请求**恰好 503** 且 node-b 计数为 0；节点恢复后恢复 200 |
-| `TestM5E2EPanelAPI` | 未登录 401、CSRF 写保护 403、登录、节点/组 CRUD、设置热更与 undo、非法设置 422 保旧值、审计无密码明文、overview/topn/cert/sessions、安全响应头 |
-| `TestM3M6E2EStickyAndFailover` | fastest+sticky 同源命中同一节点；cancel 后 failover（14ms 200）；节点离线后经另一节点恢复 |
-| `TestM3M6E2EConcurrentAndGracefulShutdown` | 30 并发 64KB 全部正确；`ActiveStreams` 2s 内归零；cancel 后 Run 6.6ms 返回 nil、端口拒绝新连接 |
-
-### 3. 真实二进制冒烟（Windows，非进程内）
-
-- 双二进制启动：服务端首启打印代理凭据/面板管理员密码/SPKI pin；客户端 pin 连接、QUIC 注册、双平面就绪。
-- 代理入口：HTTP GET、HTTP POST 60000B/300000B（含 zstd 压缩，origin 逐字节确认）、HTTP chunked 100000B、CONNECT + TLS 目标（`tls-ok`）、SOCKS5 用户名密码，全部成功。
-- 面板：`POST /api/v1/login`（JWT+CSRF）、`GET /overview`（requests/errors/transport_mix/trend/clock_skew_ms/cert）、`GET /stats/topn`（targets/nodes/credentials 各计数与字节准确）、`GET /cert`（pin/pin_next/not_after）、`GET /tunnel/sessions`（node/transport/state/planes/epoch）、`GET /` 返回内嵌 SPA（26.5KB HTML）、`GET /static/app.js` 200、`GET /healthz` 全 ok。
-- 热更新：`PUT /settings`（完整 Settings 包装）即时生效、版本自增、写审计；`POST /settings/undo` 还原；`POST /cert/rotate-pin` 立即更新 `/cert.pin_next` 且 HELLO_ACK 热下发。
-- 安全默认：未设置测试豁免时，回环目标被 ACL 强制拒绝（403 + 审计 `proxy.acl_denied`），符合 SSRF 防护预期。
-- 审计：登录、设置变更、ACL 拒绝、`proxy_request` 均有记录，无密码/令牌明文。
-
-### 4. 已知边界与偏差（完整列表见「设计决策与取舍」15–26）
-
-- `tunnel.quic_cc: bbr` 在 quic-go v0.48.2 下被接受但不生效（该版本无公共拥塞控制配置 API，默认 CUBIC），启动不报错、文档标注。
-- ACME 未内置（ca 模式 + 证书热重载对接外部 certbot）。
-- 面板与 mTLS 隧道共用 TCP 监听：启用 mTLS 时浏览器访问面板也需客户端证书（启动告警 + 部署文档说明，建议面板独立入口）。
-- pin 模式按 SPKI 信任、不校验证书有效期（密钥未变即受信）；需要有效期校验用 ca 模式。
-- 传输层 window stall 看门狗在连接建立时读取运行设置，热改需重连/重启生效。
-- drain 预算以服务端为准（节点 KICK 后按自身默认 10s 关闭；服务端设置的 drain 不通过 HELLO_ACK 下发）。
-- 通用 UDP 中继、插件系统、面板远程执行、自更新为明确非目标/进阶项。
-- **硬杀节点的离线判定时延**：QUIC 节点被 `kill -9`/强杀后，服务端依赖心跳丢失（15s×3≈45s）判定会话失效并置离线，实测面板/registry 判定离线约 58–72s（含心跳调度余量）；判定离线后调度立即停止向该节点分配，组隔离 fail-closed 不受影响。判死前若有在途请求可能返回 502/504，客户端重试即可。这是附件心跳机制的固有边界，未额外缩短心跳（避免正常抖动误杀），已由验收脚本记录并纳入 `docs/ACCEPTANCE.md`。
+- 单元/集成测试覆盖：调度策略、粘性、黑名单、熔断、组过滤与 fail-closed、ACL、帧编解码/窗口、会话与流状态机、配置加载、凭据校验、证书与 pin、Geo provider 解析/SSRF、HTTP/CONNECT/SOCKS5 端到端。
+- 集成测试使用进程内服务端 + 2 个模拟节点 + 本地 echo/HTTP 服务，覆盖三种代理入口、组隔离、故障转移与透明重试。
+- GitHub Actions：
+  - `CI`：gofmt、`go build`、`go vet`、`go test -race ./...`；
+  - `Build`：Linux/macOS/Windows 多平台二进制、GHCR 多架构 Docker 镜像；推送 `v*` tag 时自动创建 Release。
 
 ## 故障排查
 
@@ -476,19 +422,6 @@ docs/REMOTE_TEST_REPORT.md 远程真实服务器全功能测试报告
 - 不做面板内节点远程执行。
 - 单实例模式即可满足需求；多服务端 + 共享节点池（状态外置）明确为非目标。
 - 自更新（校验和验证 + 原子替换 + 失败回滚）为可选进阶项，本版未实现。
-
-## 开发与测试
-
-```bash
-go build ./...            # 编译
-go vet ./...              # 静态检查
-go test ./...             # 单元测试
-go test -race ./...       # 竞态检测
-go test ./internal/integration/ -v   # 进程内端到端集成测试
-pwsh -File scripts/acceptance.ps1    # 验收自测（Windows）
-```
-
-测试矩阵：调度策略/粘性/黑名单/熔断、组过滤与 fail-closed、ACL、帧编解码/窗口、会话与流 FSM、配置加载、凭据校验、证书与 pin、provider 解析/SSRF、HTTP/CONNECT/SOCKS5 端到端；集成测试用进程内服务端 + 2 个模拟节点 + 本地 echo/HTTP 服务覆盖三种代理、组隔离、故障转移与透明重试。
 
 ## 许可证
 

@@ -31,7 +31,7 @@ import (
 )
 
 // Timeouts and backoff parameters mandated by the tunnel design attachment
-// (tunnel-state-machine.md chapter 6). They are exported so tests and the
+// (状态机设计第 6 章). They are exported so tests and the
 // assembly layer can reason about the production values; per node behaviour
 // must never drift, therefore they are not configuration file options.
 const (

@@ -94,7 +94,7 @@ const (
 	ActionDeny  = "deny"
 )
 
-// Breaker states (aligned with tunnel-state-machine.md chapter 5).
+// Breaker states (与状态机设计第 5 章一致).
 const (
 	BreakerClosed   = "closed"
 	BreakerOpen     = "open"

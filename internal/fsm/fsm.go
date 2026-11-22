@@ -11,7 +11,7 @@ import (
 // SessionState is the transport connection lifecycle state.
 type SessionState string
 
-// Session states (tunnel-state-machine.md chapter 2).
+// Session states (状态机设计第 2 章).
 const (
 	SessionDialing     SessionState = "dialing"
 	SessionHandshaking SessionState = "handshaking"
@@ -132,7 +132,7 @@ func (s SessionState) CanHoldNewStreams() bool { return s == SessionReady || s =
 // StreamState is the lifecycle of one proxied connection.
 type StreamState string
 
-// Stream states (tunnel-state-machine.md chapter 3).
+// Stream states (状态机设计第 3 章).
 const (
 	StreamNew        StreamState = "new"
 	StreamOpening    StreamState = "opening"
