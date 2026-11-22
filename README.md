@@ -186,6 +186,7 @@ systemctl start proxygw-client
 | `UPDATE_CHECK_DELAY` | `1m` | 启动后首次检查延迟 |
 | `UPDATE_REPOSITORY` | `WAADRI/proxygw` | GitHub 仓库 |
 | `UPDATE_PROXIES` | `https://gh-proxy.com,https://ghproxy.net` | 代理前缀列表，逗号分隔；会依次回退 |
+| `UPDATE_PREFER_PROXY` | false | 先尝试代理，再尝试 GitHub 直连（适合 GitHub 完全不可达的网络） |
 | `UPDATE_GITHUB_TOKEN` | 空 | 可选 GitHub token，仅用于降低 API 限流 |
 
 代理前缀也支持 `{url}` 占位符，例如：

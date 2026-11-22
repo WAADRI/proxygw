@@ -254,15 +254,32 @@ func (u *Updater) Update(ctx context.Context) (Result, error) {
 
 	assetName := u.assetName(release.Version)
 	directAsset := fmt.Sprintf("%s/%s/releases/download/%s/%s", u.ghBase, u.repo, release.Tag, assetName)
-	sources := []string{directAsset}
-	for _, proxy := range u.proxies {
-		sources = append(sources, proxyURL(proxy, directAsset))
+	sources := make([]string, 0, len(u.proxies)+1)
+	preferProxy := envBool("UPDATE_PREFER_PROXY")
+	if preferProxy {
+		for _, proxy := range u.proxies {
+			sources = append(sources, proxyURL(proxy, directAsset))
+		}
+	}
+	sources = append(sources, directAsset)
+	if !preferProxy {
+		for _, proxy := range u.proxies {
+			sources = append(sources, proxyURL(proxy, directAsset))
+		}
 	}
 
 	var lastErr error
 	for _, assetURL := range sources {
 		u.logger.Debug("尝试下载更新包", "event", "update.download", "url", redactURL(assetURL))
-		result, err := u.downloadAndInstall(ctx, release, assetURL)
+		sourceCtx := ctx
+		cancel := func() {}
+		// Direct GitHub from some networks blackholes rather than resetting;
+		// keep a short per-source budget so the proxy fallback is reached quickly.
+		if assetURL == directAsset {
+			sourceCtx, cancel = context.WithTimeout(ctx, 90*time.Second)
+		}
+		result, err := u.downloadAndInstall(sourceCtx, release, assetURL)
+		cancel()
 		if err != nil {
 			lastErr = err
 			u.logger.Warn("更新包下载或校验失败，尝试下一个源", "event", "update.source_failed",
