@@ -47,6 +47,9 @@ type Options struct {
 	// NodeTokens manages node tunnel credentials. When nil the token endpoints
 	// degrade to 503 and the rest of the panel keeps working.
 	NodeTokens NodeTokensAPI
+	// NodeUpdates drives binary-only node self-updates. Docker nodes are
+	// rejected before this interface is called.
+	NodeUpdates NodeUpdatesAPI
 	// KickCredential immediately closes every existing proxy session of the
 	// credential and returns how many were kicked. Provided by app.
 	KickCredential func(credentialID string) int
@@ -73,6 +76,13 @@ type NodeTokensAPI interface {
 	Issue(nodeID, note string) (string, error)
 	Revoke(nodeID string) error
 	List() []model.NodeToken
+}
+
+// NodeUpdatesAPI starts binary self-updates. Rolling updates are driven by app
+// so the queue survives a closed browser tab.
+type NodeUpdatesAPI interface {
+	StartNodeUpdate(nodeID string) error
+	StartRollingUpdate(nodeIDs []string) (int, error)
 }
 
 // SessionInfo is one tunnel session as exposed by the tunnel layer.

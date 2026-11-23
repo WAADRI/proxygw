@@ -443,37 +443,106 @@ func (u *Updater) tagFromLatestRedirect(ctx context.Context, target string) (str
 	return tag, nil
 }
 
-func (u *Updater) downloadAndInstall(ctx context.Context, release Release, assetURL string) (Result, error) {
+// Staged is a verified new binary downloaded into a temporary path. The caller
+// owns BinaryPath and must remove it after installing or abandoning the update.
+type Staged struct {
+	Version    string
+	BinaryPath string
+	Updated    bool
+}
+
+// Stage downloads and verifies the latest release but does not touch the running
+// binary. It is used by the node update helper flow, where a separate process
+// performs the final atomic replacement after the old process exits.
+func (u *Updater) Stage(ctx context.Context) (Staged, error) {
+	release, newer, err := u.Check(ctx)
+	if err != nil {
+		return Staged{}, err
+	}
+	if !newer {
+		return Staged{Version: release.Version}, nil
+	}
+	assetName := u.assetName(release.Version)
+	directAsset := fmt.Sprintf("%s/%s/releases/download/%s/%s", u.ghBase, u.repo, release.Tag, assetName)
+	sources := u.assetSources(directAsset)
+	var lastErr error
+	for _, assetURL := range sources {
+		sourceCtx := ctx
+		cancel := func() {}
+		if assetURL == directAsset {
+			sourceCtx, cancel = context.WithTimeout(ctx, 90*time.Second)
+		}
+		staged, err := u.stageFrom(sourceCtx, release, assetURL)
+		cancel()
+		if err != nil {
+			lastErr = err
+			u.logger.Warn("更新包下载或校验失败，尝试下一个源", "event", "update.source_failed",
+				"url", redactURL(assetURL), "error", err)
+			continue
+		}
+		return staged, nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("没有可用的更新下载源")
+	}
+	return Staged{}, fmt.Errorf("updater: %w", lastErr)
+}
+
+func (u *Updater) assetSources(directAsset string) []string {
+	preferProxy := envBool("UPDATE_PREFER_PROXY")
+	sources := make([]string, 0, len(u.proxies)+1)
+	if preferProxy {
+		for _, proxy := range u.proxies {
+			sources = append(sources, proxyURL(proxy, directAsset))
+		}
+	}
+	sources = append(sources, directAsset)
+	if !preferProxy {
+		for _, proxy := range u.proxies {
+			sources = append(sources, proxyURL(proxy, directAsset))
+		}
+	}
+	return sources
+}
+
+func (u *Updater) stageFrom(ctx context.Context, release Release, assetURL string) (Staged, error) {
 	checksumURL := assetURL + ".sha256"
 	expected, err := u.downloadChecksum(ctx, checksumURL)
 	if err != nil {
-		return Result{}, fmt.Errorf("checksum: %w", err)
+		return Staged{}, fmt.Errorf("checksum: %w", err)
 	}
 	archive, err := u.downloadArchive(ctx, assetURL)
 	if err != nil {
-		return Result{}, err
+		return Staged{}, err
 	}
 	defer os.Remove(archive)
-
 	actual, err := fileSHA256(archive)
 	if err != nil {
-		return Result{}, err
+		return Staged{}, err
 	}
 	if actual != expected {
-		return Result{}, fmt.Errorf("archive checksum mismatch: got %s want %s", actual, expected)
+		return Staged{}, fmt.Errorf("archive checksum mismatch: got %s want %s", actual, expected)
 	}
 	newPath, err := u.extractBinary(archive, release.Version)
 	if err != nil {
+		return Staged{}, err
+	}
+	return Staged{Version: release.Version, BinaryPath: newPath, Updated: true}, nil
+}
+
+func (u *Updater) downloadAndInstall(ctx context.Context, release Release, assetURL string) (Result, error) {
+	staged, err := u.stageFrom(ctx, release, assetURL)
+	if err != nil {
 		return Result{}, err
 	}
-	installed, err := u.install(newPath)
+	installed, err := u.install(staged.BinaryPath)
 	if err != nil {
-		os.Remove(newPath)
+		os.Remove(staged.BinaryPath)
 		return Result{}, err
 	}
 	u.logger.Warn("二进制更新已完成，重启进程后生效", "event", "update.applied",
 		"version", release.Version, "binary", installed)
-	return Result{Updated: true, Version: release.Version, BinaryPath: installed, Archive: archive}, nil
+	return Result{Updated: true, Version: release.Version, BinaryPath: installed}, nil
 }
 
 func (u *Updater) downloadChecksum(ctx context.Context, target string) (string, error) {

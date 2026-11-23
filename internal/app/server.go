@@ -36,17 +36,18 @@ type Server struct {
 	cfg    *config.ServerConfig
 	logger *slog.Logger
 
-	certMgr   *certs.Manager
-	metrics   *metrics.Metrics
-	health    *health.Server
-	registry  *registry.Registry
-	authn     *nodesauth.Authenticator
-	settings  *settings.Manager
-	tunnel    *tunnel.Server
-	metadata  *metadataCoordinator
-	gateway   *gateway
-	panelDeps *panelDeps
-	hook      *webhook.Sender
+	certMgr     *certs.Manager
+	metrics     *metrics.Metrics
+	health      *health.Server
+	registry    *registry.Registry
+	authn       *nodesauth.Authenticator
+	settings    *settings.Manager
+	tunnel      *tunnel.Server
+	metadata    *metadataCoordinator
+	gateway     *gateway
+	panelDeps   *panelDeps
+	hook        *webhook.Sender
+	nodeUpdates *nodeUpdateManager
 
 	quicListener transport.Listener
 	wsListener   *transport.WSListener
@@ -203,6 +204,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		return nil, fmt.Errorf("app: init tunnel server: %w", err)
 	}
 	s.tunnel = tun
+	s.nodeUpdates = newNodeUpdateManager(s)
 	s.health.AddCheck("tunnel", func() error {
 		if s.tunnel == nil {
 			return errors.New("tunnel not initialised")

@@ -187,6 +187,7 @@
         </div>
         <div class="page-actions">
           <span id="nodes-live-hint" class="muted small">页面可见时每 3 秒自动刷新</span>
+          <button type="button" class="btn btn-ghost btn-sm" id="nodes-update-all" data-action="nodes-update-all" disabled title="节点列表尚未加载">更新可更新节点</button>
         </div>
       </header>
 
@@ -216,31 +217,36 @@
           <button type="submit" class="btn btn-primary">筛选</button>
           <button type="reset" class="btn btn-ghost">重置</button>
           <button type="button" class="btn btn-ghost" data-action="nodes-refresh">刷新</button>
+          <div class="column-picker" id="nodes-column-picker">
+            <button type="button" class="btn btn-ghost" data-action="nodes-columns-toggle" aria-haspopup="true" aria-expanded="false" aria-controls="nodes-columns-popover">显示列</button>
+            <div id="nodes-columns-popover" class="column-popover" role="dialog" aria-label="选择要显示的列" hidden></div>
+          </div>
         </div>
       </form>
 
       <div id="nodes-summary" class="summary-bar"></div>
 
-      <div class="table-wrap">
+      <div class="table-wrap nodes-table-wrap" id="nodes-table-wrap">
         <table class="data-table" id="nodes-table">
           <thead>
             <tr>
-              <th class="col-name">别名 / ID</th>
-              <th>组</th>
-              <th>出口 IP</th>
-              <th>国家</th>
-              <th>城市</th>
-              <th>ASN</th>
-              <th>ISP</th>
-              <th class="col-num">权重</th>
-              <th class="col-num">在途</th>
-              <th class="col-num">延迟</th>
-              <th class="col-num">累计流量</th>
-              <th>熔断</th>
-              <th>版本</th>
-              <th>传输</th>
-              <th>在线</th>
-              <th class="col-actions">操作</th>
+              <th class="col-name" data-col="name">别名 / ID</th>
+              <th data-col="group">组</th>
+              <th data-col="egress">出口 IP</th>
+              <th data-col="country">国家</th>
+              <th data-col="city">城市</th>
+              <th data-col="asn">ASN</th>
+              <th data-col="isp">ISP</th>
+              <th class="col-num" data-col="weight">权重</th>
+              <th class="col-num" data-col="inflight">在途</th>
+              <th class="col-num" data-col="latency">延迟</th>
+              <th class="col-num" data-col="bytes">累计流量</th>
+              <th data-col="breaker">熔断</th>
+              <th data-col="version">版本</th>
+              <th data-col="transport">传输</th>
+              <th data-col="online">在线</th>
+              <th data-col="update">更新状态</th>
+              <th class="col-actions" data-col="actions">操作</th>
             </tr>
           </thead>
           <tbody id="nodes-tbody"></tbody>

@@ -387,6 +387,73 @@ func (s *Server) handleNodeKick(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// handleNodeUpdate starts a self-update for one binary node.
+func (s *Server) handleNodeUpdate(w http.ResponseWriter, r *http.Request) {
+	nodeID := strings.TrimSpace(r.PathValue("id"))
+	node, ok := s.opts.Registry.Get(nodeID)
+	if !ok {
+		s.writeError(w, http.StatusNotFound, "not_found", "节点不存在", nil)
+		return
+	}
+	if err := s.checkNodeUpdateAllowed(node); err != nil {
+		s.writeError(w, http.StatusConflict, "node_update_not_allowed", err.Error(), nil)
+		return
+	}
+	if s.opts.NodeUpdates == nil {
+		s.writeUnavailable(w, "节点更新")
+		return
+	}
+	if err := s.opts.NodeUpdates.StartNodeUpdate(nodeID); err != nil {
+		s.writeError(w, http.StatusConflict, "node_update_busy", err.Error(), nil)
+		return
+	}
+	s.auditRequest(r, "node.update", nodeID, "ok", nil)
+	s.log.Warn("面板下发节点更新", "node_id", nodeID, "actor", sessionUsername(r), "source_ip", remoteIP(r))
+	s.notify()
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "node_id": nodeID})
+}
+
+// handleNodesUpdate queues a rolling update over all eligible binary nodes.
+func (s *Server) handleNodesUpdate(w http.ResponseWriter, r *http.Request) {
+	if s.opts.NodeUpdates == nil {
+		s.writeUnavailable(w, "节点更新")
+		return
+	}
+	var ids []string
+	for _, node := range s.opts.Registry.List() {
+		if s.checkNodeUpdateAllowed(node) != nil {
+			continue
+		}
+		ids = append(ids, node.ID)
+	}
+	if len(ids) == 0 {
+		s.writeError(w, http.StatusConflict, "node_update_not_allowed", "当前没有可更新的裸二进制节点", nil)
+		return
+	}
+	queued, err := s.opts.NodeUpdates.StartRollingUpdate(ids)
+	if err != nil {
+		s.writeError(w, http.StatusConflict, "node_update_busy", err.Error(), nil)
+		return
+	}
+	s.auditRequest(r, "node.update_all", "rolling", "ok", map[string]string{"queued": strconv.Itoa(queued)})
+	s.log.Warn("面板下发滚动节点更新", "nodes", queued, "actor", sessionUsername(r), "source_ip", remoteIP(r))
+	s.notify()
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "queued": queued})
+}
+
+func (s *Server) checkNodeUpdateAllowed(node model.Node) error {
+	if !node.Online {
+		return fmt.Errorf("节点 %s 不在线", node.ID)
+	}
+	if node.Runtime == "docker" {
+		return fmt.Errorf("节点 %s 运行在容器中，请更新镜像而不是替换容器内二进制", node.ID)
+	}
+	if !node.UpdateCapable {
+		return fmt.Errorf("节点 %s 的客户端版本不支持在线更新", node.ID)
+	}
+	return nil
+}
+
 // probeRequest is the POST /nodes/{id}/probe body.
 type probeRequest struct {
 	Kind       string `json:"kind"`

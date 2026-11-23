@@ -36,6 +36,34 @@ func (s *Server) KickNode(nodeID, reason, message string) error {
 	return nil
 }
 
+// UpdateNode sends a self-update command to one live plane of nodeID. The node
+// downloads the release itself and reports progress over UPDATE_STATUS/STATS.
+func (s *Server) UpdateNode(nodeID string, cmd protocol.UpdateCommand) error {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return errors.New("tunnel: empty node id")
+	}
+	sessions := s.liveSessionsFor(nodeID)
+	if len(sessions) == 0 {
+		return fmt.Errorf("tunnel: node %q has no active sessions", nodeID)
+	}
+	var lastErr error
+	for _, sess := range sessions {
+		if err := sess.sendJSON(protocol.FrameUpdate, cmd); err != nil {
+			lastErr = err
+			continue
+		}
+		s.logger.Info("node update dispatched",
+			"event", "node_update", "node_id", nodeID, "version", cmd.Version,
+			"command_id", cmd.CommandID)
+		return nil
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no reachable plane")
+	}
+	return fmt.Errorf("tunnel: send UPDATE to node %q: %w", nodeID, lastErr)
+}
+
 // DrainNode stops assigning new streams to nodeID but lets the node close
 // naturally after its in-flight streams finish.
 func (s *Server) DrainNode(nodeID string) error {

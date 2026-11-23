@@ -158,27 +158,30 @@ func (g Geo) IsZero() bool {
 
 // Node is the runtime view of one node, aggregated over its transport planes.
 type Node struct {
-	ID            string    `json:"id"`
-	Alias         string    `json:"alias,omitempty"`
-	Region        string    `json:"region,omitempty"`    // manual label overrides detected region
-	ISPLabel      string    `json:"isp_label,omitempty"` // manual label overrides detected ISP
-	Tags          []string  `json:"tags,omitempty"`
-	Weight        int       `json:"weight"`
-	Enabled       bool      `json:"enabled"`
-	Online        bool      `json:"online"`
-	EgressIP      EgressIP  `json:"egress_ip"`
-	Geo           Geo       `json:"geo"`
-	Inflight      int64     `json:"inflight"`
-	BytesIn       uint64    `json:"bytes_in"`
-	BytesOut      uint64    `json:"bytes_out"`
-	LatencyEWMA   float64   `json:"latency_ewma_ms"`
-	BreakerState  string    `json:"breaker_state"`
-	LastHeartbeat time.Time `json:"last_heartbeat,omitempty"`
-	FirstSeen     time.Time `json:"first_seen,omitempty"`
-	Version       string    `json:"version,omitempty"`
-	Groups        []string  `json:"groups,omitempty"`
-	Transport     string    `json:"transport,omitempty"`
-	Planes        int       `json:"planes"`
+	ID            string      `json:"id"`
+	Alias         string      `json:"alias,omitempty"`
+	Region        string      `json:"region,omitempty"`    // manual label overrides detected region
+	ISPLabel      string      `json:"isp_label,omitempty"` // manual label overrides detected ISP
+	Tags          []string    `json:"tags,omitempty"`
+	Weight        int         `json:"weight"`
+	Enabled       bool        `json:"enabled"`
+	Online        bool        `json:"online"`
+	EgressIP      EgressIP    `json:"egress_ip"`
+	Geo           Geo         `json:"geo"`
+	Inflight      int64       `json:"inflight"`
+	BytesIn       uint64      `json:"bytes_in"`
+	BytesOut      uint64      `json:"bytes_out"`
+	LatencyEWMA   float64     `json:"latency_ewma_ms"`
+	BreakerState  string      `json:"breaker_state"`
+	LastHeartbeat time.Time   `json:"last_heartbeat,omitempty"`
+	FirstSeen     time.Time   `json:"first_seen,omitempty"`
+	Version       string      `json:"version,omitempty"`
+	Runtime       string      `json:"runtime,omitempty"`
+	UpdateCapable bool        `json:"update_capable,omitempty"`
+	Update        *NodeUpdate `json:"update,omitempty"`
+	Groups        []string    `json:"groups,omitempty"`
+	Transport     string      `json:"transport,omitempty"`
+	Planes        int         `json:"planes"`
 	// Capabilities are the protocol capabilities advertised by the node in
 	// HELLO (for example "zstd", "dns", "probe").
 	Capabilities []string `json:"capabilities,omitempty"`
@@ -187,6 +190,17 @@ type Node struct {
 	DuplicateOf string    `json:"duplicate_of,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// NodeUpdate is the panel view of one node's self-update state.
+type NodeUpdate struct {
+	State          string    `json:"state"`
+	CurrentVersion string    `json:"current_version,omitempty"`
+	TargetVersion  string    `json:"target_version,omitempty"`
+	Progress       int       `json:"progress,omitempty"`
+	Message        string    `json:"message,omitempty"`
+	Error          string    `json:"error,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at,omitempty"`
 }
 
 // EffectiveRegion returns the manual region label when set.

@@ -100,23 +100,25 @@ func (s *session) hello(ctx context.Context) error {
 
 	v4, v6 := s.a.egress()
 	msg := protocol.Hello{
-		Ver:          protocol.Version1,
-		Token:        s.a.cfg.EffectiveToken(),
-		ClientID:     s.a.clientID,
-		Alias:        s.a.cfg.Alias,
-		Tags:         s.a.cfg.NormalizedTags(),
-		Region:       s.a.cfg.Region,
-		ISPLabel:     s.a.cfg.ISPLabel,
-		Weight:       s.a.cfg.Weight,
-		Transport:    string(s.kind),
-		Planes:       len(s.a.planes),
-		PlaneIndex:   s.plane,
-		EgressV4:     v4,
-		EgressV6:     v6,
-		Version:      s.a.version,
-		Capabilities: []string{protocol.CapZstd, protocol.CapDNS, protocol.CapProbe},
-		Compression:  s.a.cfg.Compression,
-		TS:           protocol.NowMillis(),
+		Ver:           protocol.Version1,
+		Token:         s.a.cfg.EffectiveToken(),
+		ClientID:      s.a.clientID,
+		Alias:         s.a.cfg.Alias,
+		Tags:          s.a.cfg.NormalizedTags(),
+		Region:        s.a.cfg.Region,
+		ISPLabel:      s.a.cfg.ISPLabel,
+		Weight:        s.a.cfg.Weight,
+		Transport:     string(s.kind),
+		Planes:        len(s.a.planes),
+		PlaneIndex:    s.plane,
+		EgressV4:      v4,
+		EgressV6:      v6,
+		Version:       s.a.version,
+		Runtime:       s.a.runtimeEnv,
+		UpdateCapable: s.a.updateCapable,
+		Capabilities:  []string{protocol.CapZstd, protocol.CapDNS, protocol.CapProbe, protocol.CapUpdate},
+		Compression:   s.a.cfg.Compression,
+		TS:            protocol.NowMillis(),
 	}
 	payload, err := protocol.Marshal(msg)
 	if err != nil {
@@ -339,6 +341,13 @@ func (s *session) dispatch(typ protocol.FrameType, payload []byte) {
 			return
 		}
 		s.startProbe(probe)
+	case protocol.FrameUpdate:
+		var cmd protocol.UpdateCommand
+		if err := protocol.Unmarshal(payload, &cmd); err != nil {
+			s.log.Warn("解析 UPDATE 失败", "event", "update.invalid", "error", err)
+			return
+		}
+		s.a.startUpdate(cmd)
 	case protocol.FrameStats:
 		// Direction is node -> server only.
 	case protocol.FrameHello, protocol.FrameHelloAck:
@@ -390,6 +399,8 @@ func (s *session) sendStats() {
 		LatencyMS:     s.a.latencyMS(),
 		Transport:     string(s.kind),
 		Version:       s.a.version,
+		Runtime:       s.a.runtimeEnv,
+		Update:        s.a.updateStatusSnapshot(),
 		EgressV4:      v4,
 		EgressV6:      v6,
 		TS:            protocol.NowMillis(),

@@ -199,6 +199,21 @@ UPDATE_PROXIES='https://gh-proxy.com/{url}'
 
 > Docker 部署请继续通过镜像 tag 更新，不建议在容器内开启自动更新：容器内替换的二进制不会持久化到镜像，重建容器后会丢失。
 
+### 面板节点在线更新（仅裸二进制）
+
+面板「节点」页支持对**裸二进制部署**的节点执行在线更新，Docker/Kubernetes 节点会在接口层被拒绝，请改用镜像更新。
+
+- 单节点「更新」或页头「更新可更新节点」；
+- 服务端按一次一台滚动执行，失败即暂停队列；
+- 节点自检运行环境、二进制目录写权限后，下载 Release 并通过 `.sha256` 校验；
+- 节点把自身二进制复制成临时 helper，随后优雅退出；helper 等待旧进程退出后原子替换、重启，失败时回滚；
+- systemd 裸二进制优先通过 `systemctl restart` 重启，直接运行的二进制由 helper 直接启动；
+- 状态通过 `UPDATE_STATUS`/`STATS` 回传，面板显示：检查中、下载中、待重启、替换中、重启中、成功、失败、已回滚。
+
+Windows 裸二进制也支持该流程（helper 从状态目录运行，不锁住目标 `.exe`）。更新命令本身不携带任意 URL，节点只从配置的 GitHub 仓库/代理获取并校验 Release。
+
+更新协议帧：`0x16 UPDATE`（服务端→节点指令）、`0x17 UPDATE_STATUS`（节点→服务端状态）。
+
 ## 隧道协议
 
 ### WebSocket 帧
@@ -219,6 +234,7 @@ UPDATE_PROXIES='https://gh-proxy.com/{url}'
 | 0x12 | KICK | shutdown/replaced/revoked/disabled |
 | 0x13 | STATS_REQ | 立即上报统计 |
 | 0x14 / 0x15 | PROBE / PROBE_RESULT | 节点拨测与 DNS 转发 |
+| 0x16 / 0x17 | UPDATE / UPDATE_STATUS | 面板下发节点在线更新、节点上报进度 |
 
 ### OPEN 头（两路径一致）
 

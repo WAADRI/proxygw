@@ -58,6 +58,8 @@ const (
 	FrameStatsReq FrameType = 0x13
 	FrameProbe    FrameType = 0x14
 	FrameProbeRes FrameType = 0x15
+	FrameUpdate   FrameType = 0x16
+	FrameUpdateSt FrameType = 0x17
 )
 
 var frameNames = map[FrameType]string{
@@ -66,6 +68,7 @@ var frameNames = map[FrameType]string{
 	FramePing: "PING", FramePong: "PONG", FrameStats: "STATS", FrameRST: "RST",
 	FrameHello: "HELLO", FrameHelloAck: "HELLO_ACK", FrameKick: "KICK",
 	FrameStatsReq: "STATS_REQ", FrameProbe: "PROBE", FrameProbeRes: "PROBE_RESULT",
+	FrameUpdate: "UPDATE", FrameUpdateSt: "UPDATE_STATUS",
 }
 
 // String implements fmt.Stringer.
@@ -81,7 +84,7 @@ func (t FrameType) String() string {
 // on control streams (QUIC) or with stream id 0 (WS).
 func (t FrameType) IsControl() bool {
 	switch t {
-	case FrameHello, FrameHelloAck, FrameKick, FrameStats, FrameStatsReq, FrameProbe, FrameProbeRes, FramePing, FramePong:
+	case FrameHello, FrameHelloAck, FrameKick, FrameStats, FrameStatsReq, FrameProbe, FrameProbeRes, FramePing, FramePong, FrameUpdate, FrameUpdateSt:
 		return true
 	}
 	return false

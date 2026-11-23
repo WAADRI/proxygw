@@ -30,19 +30,40 @@ type clientSession interface {
 	Status() nodeagent.Status
 	ClientID() string
 	BootMessages() []string
+	UpdatePending() bool
 }
 
 func main() { os.Exit(run()) }
 
 func run() int {
 	var (
-		configPath  = flag.String("config", "config.client.yaml", "节点配置文件路径")
-		showVersion = flag.Bool("version", false, "打印版本信息后退出")
-		checkOnly   = flag.Bool("check-config", false, "仅校验配置后退出")
-		updateCheck = flag.Bool("update-check", false, "仅检查 GitHub 是否有新版本")
-		updateNow   = flag.Bool("update", false, "下载并安装最新版本后退出（需手动重启）")
+		configPath    = flag.String("config", "config.client.yaml", "节点配置文件路径")
+		showVersion   = flag.Bool("version", false, "打印版本信息后退出")
+		checkOnly     = flag.Bool("check-config", false, "仅校验配置后退出")
+		updateCheck   = flag.Bool("update-check", false, "仅检查 GitHub 是否有新版本")
+		updateNow     = flag.Bool("update", false, "下载并安装最新版本后退出（需手动重启）")
+		applyUpdate   = flag.Bool("apply-update", false, "内部使用：更新 helper")
+		updateTarget  = flag.String("update-target", "", "内部使用：目标二进制")
+		updateNew     = flag.String("update-new", "", "内部使用：新二进制")
+		updatePID     = flag.Int("update-pid", 0, "内部使用：旧进程 PID")
+		updateArgs    = flag.String("update-args", "", "内部使用：重启参数（base64 JSON）")
+		updateStatus  = flag.String("update-status", "", "内部使用：状态文件")
+		updateVersion = flag.String("update-version", "", "内部使用：目标版本")
+		updateCwd     = flag.String("update-cwd", "", "内部使用：重启工作目录")
 	)
 	flag.Parse()
+
+	if *applyUpdate {
+		return runUpdateHelper(updateHelperInvocation{
+			target:  *updateTarget,
+			newPath: *updateNew,
+			parent:  *updatePID,
+			args:    *updateArgs,
+			status:  *updateStatus,
+			version: *updateVersion,
+			cwd:     *updateCwd,
+		})
+	}
 
 	if *showVersion {
 		writeJSON(version.Current())
@@ -120,8 +141,13 @@ func runClientLoop(ctx context.Context, logger *slog.Logger, cfg *config.ClientC
 
 		runErr := client.Run(ctx)
 		st := client.Status()
+		updatePending := client.UpdatePending()
 		_ = client.Close()
 		lastTransport, lastPlanes = st.Transport, st.Planes
+		if updatePending {
+			logger.Info("节点更新 helper 已接管，退出当前进程", "event", "agent.update_restart")
+			return 0
+		}
 		if runErr != nil {
 			if nodeagentFatal(runErr) {
 				logger.Error("节点因致命错误退出（不会自动重连）", "error", runErr)

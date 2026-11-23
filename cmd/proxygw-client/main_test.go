@@ -14,7 +14,8 @@ import (
 )
 
 type fakeClientSession struct {
-	run func(context.Context) error
+	run           func(context.Context) error
+	updatePending bool
 }
 
 func (f *fakeClientSession) Run(ctx context.Context) error { return f.run(ctx) }
@@ -22,6 +23,7 @@ func (f *fakeClientSession) Close() error                  { return nil }
 func (f *fakeClientSession) Status() nodeagent.Status      { return nodeagent.Status{} }
 func (f *fakeClientSession) ClientID() string              { return "fake-node" }
 func (f *fakeClientSession) BootMessages() []string        { return nil }
+func (f *fakeClientSession) UpdatePending() bool           { return f.updatePending }
 
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -73,6 +75,24 @@ func TestRunClientLoopReconnectsAfterServerShutdown(t *testing.T) {
 	defer mu.Unlock()
 	if created != 2 {
 		t.Fatalf("newClient 调用次数 = %d, want 2", created)
+	}
+}
+
+func TestRunClientLoopStopsForUpdateRestart(t *testing.T) {
+	created := 0
+	newClient := func() (clientSession, error) {
+		created++
+		return &fakeClientSession{
+			updatePending: true,
+			run:           func(context.Context) error { return nil },
+		}, nil
+	}
+	code := runClientLoop(context.Background(), testLogger(), &config.ClientConfig{}, newClient, 0)
+	if code != 0 {
+		t.Fatalf("update restart exit code = %d, want 0", code)
+	}
+	if created != 1 {
+		t.Fatalf("update restart newClient calls = %d, want 1", created)
 	}
 }
 

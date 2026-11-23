@@ -411,19 +411,21 @@ func (sess *session) register(hello *protocol.Hello) (uint32, error) {
 	s.mu.Unlock()
 
 	_, epoch, err := s.reg.AttachPlane(registry.PlaneMeta{
-		NodeID:       nodeID,
-		PlaneIndex:   key.planeIndex,
-		Alias:        hello.Alias,
-		Tags:         append([]string(nil), hello.Tags...),
-		Region:       hello.Region,
-		ISPLabel:     hello.ISPLabel,
-		Weight:       hello.Weight,
-		Version:      hello.Version,
-		Transport:    sess.transport,
-		EgressV4:     hello.EgressV4,
-		EgressV6:     hello.EgressV6,
-		Capabilities: append([]string(nil), hello.Capabilities...),
-		Compression:  sess.compressAgreed.Load(),
+		NodeID:        nodeID,
+		PlaneIndex:    key.planeIndex,
+		Alias:         hello.Alias,
+		Tags:          append([]string(nil), hello.Tags...),
+		Region:        hello.Region,
+		ISPLabel:      hello.ISPLabel,
+		Weight:        hello.Weight,
+		Version:       hello.Version,
+		Runtime:       hello.Runtime,
+		UpdateCapable: hello.UpdateCapable,
+		Transport:     sess.transport,
+		EgressV4:      hello.EgressV4,
+		EgressV6:      hello.EgressV6,
+		Capabilities:  append([]string(nil), hello.Capabilities...),
+		Compression:   sess.compressAgreed.Load(),
 	})
 	if err != nil {
 		s.mu.Lock()
@@ -584,6 +586,13 @@ func (sess *session) handleControlFrame(typ protocol.FrameType, payload []byte) 
 			return fmt.Errorf("decode PROBE_RESULT: %w", err)
 		}
 		sess.deliverProbe(&res)
+		return nil
+	case protocol.FrameUpdateSt:
+		var st protocol.UpdateStatus
+		if err := protocol.Unmarshal(payload, &st); err != nil {
+			return fmt.Errorf("decode UPDATE_STATUS: %w", err)
+		}
+		sess.srv.reg.UpdateNodeUpdate(sess.node(), st)
 		return nil
 	default:
 		return fmt.Errorf("unexpected %s frame on control stream", typ)

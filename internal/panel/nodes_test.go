@@ -220,6 +220,36 @@ func TestNodePatch(t *testing.T) {
 	}
 }
 
+// TestNodeUpdateRejectsDocker verifies Docker nodes are rejected before the
+// update backend is consulted.
+func TestNodeUpdateRejectsDocker(t *testing.T) {
+	env := newTestEnv(t)
+	env.addNode("node-docker", "docker-node", true, func(meta *registry.PlaneMeta) {
+		meta.Runtime = "docker"
+		meta.UpdateCapable = false
+	})
+	client := env.loginClient(t)
+
+	resp, data := client.do(http.MethodPost, "/api/v1/nodes/node-docker/update", nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("docker update status=%d want 409 body=%s", resp.StatusCode, data)
+	}
+	if code := errorCode(t, data); code != "node_update_not_allowed" {
+		t.Fatalf("error=%q want node_update_not_allowed body=%s", code, data)
+	}
+
+	// A binary node reaches the update backend; with the fake environment it is
+	// not wired, so the endpoint must degrade to 503 instead of panicking.
+	env.addNode("node-binary", "binary-node", true, func(meta *registry.PlaneMeta) {
+		meta.Runtime = "binary"
+		meta.UpdateCapable = true
+	})
+	resp, data = client.do(http.MethodPost, "/api/v1/nodes/node-binary/update", nil)
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("binary update status=%d want 503 body=%s", resp.StatusCode, data)
+	}
+}
+
 // TestNodeKick checks forced offline via the tunnel plus the registry flag.
 func TestNodeKick(t *testing.T) {
 	env := newTestEnv(t)

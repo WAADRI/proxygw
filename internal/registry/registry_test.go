@@ -187,6 +187,30 @@ func TestUpdateStats(t *testing.T) {
 	r.UpdateStats("ghost", protocol.Stats{Inflight: 1})
 }
 
+func TestUpdateNodeUpdateStatus(t *testing.T) {
+	r, _ := New(nil, nil, "")
+	defer r.Close()
+	if _, _, err := r.AttachPlane(meta("node-u", 0, "1.2.3.4")); err != nil {
+		t.Fatal(err)
+	}
+	r.UpdateNodeUpdate("node-u", protocol.UpdateStatus{
+		State:          protocol.UpdateDownloading,
+		CurrentVersion: "1.0.7",
+		TargetVersion:  "1.0.8",
+		Progress:       42,
+		Message:        "downloading",
+		UpdatedAt:      1234567890000,
+	})
+	n, _ := r.Get("node-u")
+	if n.Update == nil || n.Update.State != protocol.UpdateDownloading ||
+		n.Update.TargetVersion != "1.0.8" || n.Update.Progress != 42 {
+		t.Fatalf("update status = %+v", n.Update)
+	}
+	if n.Update.UpdatedAt.UnixMilli() != 1234567890000 {
+		t.Fatalf("updated_at = %s", n.Update.UpdatedAt)
+	}
+}
+
 func TestOverridesAndPersistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "runtime-overrides.json")
 	r, err := New(nil, nil, path)

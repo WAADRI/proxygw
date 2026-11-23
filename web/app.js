@@ -605,10 +605,12 @@
     if (!keys.length) {
       banner.hidden = true;
       textEl.textContent = '';
+      syncNodesViewportOffset();
       return;
     }
     banner.hidden = false;
     textEl.textContent = keys.map(function (k) { return banners[k]; }).join('　·　');
+    syncNodesViewportOffset();
   }
 
   function toast(message, kind, timeout) {
@@ -1282,6 +1284,7 @@
     var toggle = qs('[data-action="toggle-nav"]');
     if (toggle) toggle.setAttribute('aria-expanded', 'false');
     closeModal();
+    closeNodeColumnsMenu();
     stopLive();
     updateLiveStatus();
     var loader = LOADERS[page];
@@ -2137,7 +2140,247 @@
 
   /* ================================================================== 节点页 */
 
-  var NODE_COLUMNS = 16;
+  // 节点表格列定义：name / actions 固定显示，其余列可通过「显示列」菜单隐藏。
+  var NODE_COLUMN_DEFS = [
+    { key: 'name', label: '别名 / ID', fixed: true },
+    { key: 'group', label: '组' },
+    { key: 'egress', label: '出口 IP' },
+    { key: 'country', label: '国家' },
+    { key: 'city', label: '城市' },
+    { key: 'asn', label: 'ASN' },
+    { key: 'isp', label: 'ISP' },
+    { key: 'weight', label: '权重' },
+    { key: 'inflight', label: '在途' },
+    { key: 'latency', label: '延迟' },
+    { key: 'bytes', label: '累计流量' },
+    { key: 'breaker', label: '熔断' },
+    { key: 'version', label: '版本' },
+    { key: 'transport', label: '传输' },
+    { key: 'online', label: '在线' },
+    { key: 'update', label: '更新状态' },
+    { key: 'actions', label: '操作', fixed: true }
+  ];
+  var NODE_COLUMNS_STORAGE_KEY = 'proxygw.nodes.columns';
+  var nodeColumnVisibility = null;
+  var nodeColumnMenuBuilt = false;
+
+  // node.update.state 的中文展示与徽标颜色（与后端 protocol 常量保持一致）。
+  var NODE_UPDATE_ACTIVE_STATES = ['checking', 'downloading', 'verified', 'waiting_restart', 'replacing', 'restarting'];
+  var NODE_UPDATE_LABELS = {
+    idle: '空闲',
+    checking: '检查中',
+    downloading: '下载中',
+    verified: '已校验',
+    waiting_restart: '待重启',
+    replacing: '替换中',
+    restarting: '重启中',
+    success: '成功',
+    failed: '失败',
+    rolled_back: '已回滚'
+  };
+  var NODE_UPDATE_VARIANTS = {
+    idle: 'muted',
+    checking: 'info',
+    downloading: 'info',
+    verified: 'ok',
+    waiting_restart: 'warn',
+    replacing: 'warn',
+    restarting: 'warn',
+    success: 'ok',
+    failed: 'fail',
+    rolled_back: 'warn'
+  };
+
+  function defaultNodeColumnVisibility() {
+    var map = {};
+    NODE_COLUMN_DEFS.forEach(function (def) { map[def.key] = true; });
+    return map;
+  }
+
+  function loadNodeColumnVisibility() {
+    if (nodeColumnVisibility) return nodeColumnVisibility;
+    var visible = defaultNodeColumnVisibility();
+    try {
+      var raw = window.localStorage ? window.localStorage.getItem(NODE_COLUMNS_STORAGE_KEY) : null;
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          var wanted = {};
+          parsed.forEach(function (key) { wanted[String(key)] = true; });
+          NODE_COLUMN_DEFS.forEach(function (def) {
+            visible[def.key] = !!def.fixed || !!wanted[def.key];
+          });
+        }
+      }
+    } catch (e) {
+      /* localStorage 不可用或数据损坏时回退为全部显示 */
+    }
+    nodeColumnVisibility = visible;
+    return nodeColumnVisibility;
+  }
+
+  function saveNodeColumnVisibility() {
+    if (!nodeColumnVisibility) return;
+    try {
+      if (!window.localStorage) return;
+      var keys = NODE_COLUMN_DEFS.filter(function (def) {
+        return !def.fixed && nodeColumnVisibility[def.key];
+      }).map(function (def) { return def.key; });
+      window.localStorage.setItem(NODE_COLUMNS_STORAGE_KEY, JSON.stringify(keys));
+    } catch (e) {
+      /* 隐私模式等场景下持久化失败不影响当前展示 */
+    }
+  }
+
+  function nodeColumnVisible(key) {
+    return !!loadNodeColumnVisibility()[key];
+  }
+
+  function nodeVisibleColumnCount() {
+    var visible = loadNodeColumnVisibility();
+    var count = 0;
+    NODE_COLUMN_DEFS.forEach(function (def) { if (visible[def.key]) count++; });
+    return count || 2;
+  }
+
+  function setNodeColumnVisible(key, visible) {
+    var def = null;
+    NODE_COLUMN_DEFS.forEach(function (item) { if (item.key === key) def = item; });
+    if (!def || def.fixed) return;
+    loadNodeColumnVisibility()[key] = !!visible;
+    saveNodeColumnVisibility();
+    applyNodeColumnVisibility();
+    syncNodeColumnMenuChecks();
+  }
+
+  function applyNodeColumnVisibility(root) {
+    var table = $('nodes-table');
+    if (!table) return;
+    var visible = loadNodeColumnVisibility();
+    qsa('[data-col]', root || table).forEach(function (cell) {
+      cell.classList.toggle('col-hidden', !visible[cell.dataset.col]);
+    });
+    var messageCell = qs('#nodes-tbody td.table-message');
+    if (messageCell) messageCell.colSpan = nodeVisibleColumnCount();
+  }
+
+  function syncNodeColumnMenuChecks() {
+    var popover = $('nodes-columns-popover');
+    if (!popover) return;
+    qsa('input[data-column]', popover).forEach(function (input) {
+      input.checked = nodeColumnVisible(input.dataset.column);
+    });
+  }
+
+  function buildNodeColumnsMenu() {
+    if (nodeColumnMenuBuilt) return;
+    var popover = $('nodes-columns-popover');
+    if (!popover) return;
+    nodeColumnMenuBuilt = true;
+    clear(popover);
+    var head = el('div', 'column-popover-head');
+    head.append(el('strong', null, '显示列'));
+    head.append(el('span', 'muted small', '名称 / 操作列固定'));
+    var options = el('div', 'column-options');
+    NODE_COLUMN_DEFS.forEach(function (def) {
+      if (def.fixed) return;
+      var option = el('label', 'column-option');
+      var input = el('input');
+      input.type = 'checkbox';
+      input.dataset.column = def.key;
+      input.checked = nodeColumnVisible(def.key);
+      option.append(input, el('span', null, def.label));
+      options.append(option);
+    });
+    var foot = el('div', 'column-popover-foot');
+    var showAll = btn('全部显示', { small: true });
+    showAll.addEventListener('click', function () {
+      var visible = loadNodeColumnVisibility();
+      NODE_COLUMN_DEFS.forEach(function (def) { if (!def.fixed) visible[def.key] = true; });
+      saveNodeColumnVisibility();
+      applyNodeColumnVisibility();
+      syncNodeColumnMenuChecks();
+    });
+    foot.append(showAll);
+    popover.append(head, options, foot);
+    popover.addEventListener('change', function (ev) {
+      var input = ev.target;
+      if (!input || input.type !== 'checkbox' || !input.dataset.column) return;
+      setNodeColumnVisible(input.dataset.column, input.checked);
+    });
+  }
+
+  function setNodeColumnsMenuOpen(open) {
+    var popover = $('nodes-columns-popover');
+    var trigger = qs('[data-action="nodes-columns-toggle"]');
+    if (!popover) return;
+    if (open) {
+      buildNodeColumnsMenu();
+      syncNodeColumnMenuChecks();
+      popover.hidden = false;
+    } else {
+      popover.hidden = true;
+    }
+    if (trigger) trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function closeNodeColumnsMenu() {
+    var popover = $('nodes-columns-popover');
+    if (popover && !popover.hidden) setNodeColumnsMenuOpen(false);
+  }
+
+  function toggleNodeColumnsMenu() {
+    var popover = $('nodes-columns-popover');
+    setNodeColumnsMenuOpen(!popover || popover.hidden);
+  }
+
+  // 固定高度布局里需要扣除提示横幅（global-banner）的实际高度。
+  function syncNodesViewportOffset() {
+    var banner = $('global-banner');
+    var height = banner && !banner.hidden ? Math.ceil(banner.getBoundingClientRect().height) : 0;
+    document.documentElement.style.setProperty('--nodes-banner-h', height + 'px');
+  }
+
+  function nodeUpdateMeta(node) {
+    node = node || {};
+    var update = node.update && typeof node.update === 'object' ? node.update : null;
+    var state = update && update.state ? String(update.state).toLowerCase() : '';
+    var runtime = String(node.runtime || '').toLowerCase();
+    var active = NODE_UPDATE_ACTIVE_STATES.indexOf(state) !== -1;
+    var capable = node.update_capable !== false;
+    return {
+      runtime: runtime,
+      update: update,
+      state: state,
+      active: active,
+      docker: runtime === 'docker',
+      capable: capable,
+      canUpdate: runtime === 'binary' && !!node.online && capable && !active
+    };
+  }
+
+  function nodeUpdateStateLabel(state) {
+    return NODE_UPDATE_LABELS[state] || state || '未知';
+  }
+
+  function nodeVersionText(value) {
+    var text = String(value === undefined || value === null ? '' : value).trim();
+    if (!text) return '';
+    return /^v/i.test(text) ? text : 'v' + text;
+  }
+
+  function truncateCellText(value, max) {
+    var text = String(value === undefined || value === null ? '' : value).replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return text.length > max ? text.slice(0, max) + '…' : text;
+  }
+
+  function nodeCell(key, className) {
+    var td = el('td', className || null);
+    td.dataset.col = key;
+    if (!nodeColumnVisible(key)) td.classList.add('col-hidden');
+    return td;
+  }
 
   function readNodeFilters() {
     return {
@@ -2169,7 +2412,7 @@
     var tbody = $('nodes-tbody');
     if (!tbody) return Promise.resolve();
     if (!options.silent && !state.nodes.loaded) {
-      tableMessage(tbody, NODE_COLUMNS, '正在加载节点…', { loading: true });
+      tableMessage(tbody, nodeVisibleColumnCount(), '正在加载节点…', { loading: true });
     }
     return ensureGroups().then(function () {
       return api('/nodes?' + buildNodeQuery());
@@ -2188,7 +2431,7 @@
         if (err && err.code !== 'unauthorized' && err.code !== 'csrf_invalid' && err.code !== 'network') showApiError(err);
         return;
       }
-      tableMessage(tbody, NODE_COLUMNS, '节点加载失败：' + ((err && err.message) || '未知错误'), {
+      tableMessage(tbody, nodeVisibleColumnCount(), '节点加载失败：' + ((err && err.message) || '未知错误'), {
         actionLabel: '重试',
         onAction: function () { loadNodes(); }
       });
@@ -2224,7 +2467,7 @@
   }
 
   function nodeGroupsCell(node) {
-    var td = el('td');
+    var td = nodeCell('group');
     var names = groupNames(node.groups);
     if (!names.length) {
       td.append(el('span', 'cell-sub', '—'));
@@ -2237,7 +2480,7 @@
   }
 
   function nodeEgressCell(node) {
-    var td = el('td', 'cell-nowrap');
+    var td = nodeCell('egress', 'cell-nowrap');
     var egress = node.egress_ip || {};
     var v4 = el('span', 'cell-code', egress.v4 || '—');
     td.append(v4);
@@ -2249,11 +2492,92 @@
     return td;
   }
 
+  // nodeUpdateCell 渲染后端 node.update 契约；缺失时展示「—」，Docker 节点给出弱化说明。
+  function nodeUpdateCell(node) {
+    var td = nodeCell('update', 'cell-nowrap');
+    var meta = nodeUpdateMeta(node);
+    var update = meta.update;
+    if (!update || !meta.state) {
+      if (meta.docker) {
+        td.append(el('span', 'cell-sub', 'Docker · 镜像更新'));
+        td.title = '容器部署的节点通过更新镜像版本升级，面板不执行二进制在线替换。';
+      } else {
+        td.append(el('span', 'cell-sub', '—'));
+      }
+      return td;
+    }
+    var stateLabel = nodeUpdateStateLabel(meta.state);
+    var stateBadge = badge(stateLabel, NODE_UPDATE_VARIANTS[meta.state] || 'muted');
+    var progress = Number(update.progress);
+    if (meta.active && Number.isFinite(progress)) {
+      stateBadge.textContent = stateLabel + ' ' + Math.max(0, Math.min(100, Math.round(progress))) + '%';
+    }
+    td.append(stateBadge);
+
+    var currentVersion = nodeVersionText(update.current_version || node.version);
+    var targetVersion = nodeVersionText(update.target_version);
+    if (targetVersion) {
+      td.append(el('span', 'cell-sub',
+        (currentVersion ? currentVersion + ' → ' : '目标 ') + targetVersion));
+    }
+    var errorText = update.error || ((meta.state === 'failed' || meta.state === 'rolled_back') ? update.message : '');
+    if (errorText) td.append(el('span', 'cell-sub', truncateCellText(errorText, 36)));
+
+    var titleParts = ['更新状态：' + stateLabel];
+    if (currentVersion || targetVersion) {
+      titleParts.push('版本：' + (currentVersion || '—') + ' → ' + (targetVersion || '—'));
+    }
+    if (update.message) titleParts.push('说明：' + update.message);
+    if (update.error) titleParts.push('错误：' + update.error);
+    if (update.updated_at) titleParts.push('更新时间：' + fmtDateTime(update.updated_at));
+    td.title = titleParts.join('\n');
+    return td;
+  }
+
+  // 仅 runtime=binary 且在线、update_capable 不为 false 的节点提供可用更新按钮；
+  // 更新进行中时按钮禁用并显示「更新中」。
+  function nodeUpdateActionButton(node) {
+    var meta = nodeUpdateMeta(node);
+    if (meta.active) {
+      return btn('更新中', {
+        small: true,
+        action: 'nodes-update',
+        id: node.id,
+        disabled: true,
+        title: '节点正在更新（' + nodeUpdateStateLabel(meta.state) + '），完成前不能重复触发'
+      });
+    }
+    if (!meta.canUpdate) return null;
+    return btn('更新', {
+      small: true,
+      action: 'nodes-update',
+      id: node.id,
+      title: '在线更新节点二进制到最新版本；更新期间节点会短暂离线'
+    });
+  }
+
+  function refreshNodesUpdateAllButton() {
+    var button = $('nodes-update-all');
+    if (!button) return;
+    var count = 0;
+    if (state.nodes.loaded) {
+      state.nodes.items.forEach(function (node) {
+        if (nodeUpdateMeta(node).canUpdate) count++;
+      });
+    }
+    button.disabled = count === 0;
+    if (count > 0) {
+      button.title = '批量更新：当前页有 ' + count + ' 个可更新的二进制节点；由后端滚动执行，节点会短暂离线';
+    } else {
+      button.title = state.nodes.loaded ? '当前页没有可更新的二进制节点' : '节点列表尚未加载';
+    }
+  }
+
   function nodeRow(node) {
     var tr = el('tr');
     var geo = node.geo || {};
 
-    var tdName = el('td', 'col-name');
+    var tdName = nodeCell('name', 'col-name');
     var main = el('span', 'cell-main', node.alias || node.id || '—');
     tdName.append(main);
     if (node.alias && node.id) tdName.append(el('span', 'cell-sub', node.id));
@@ -2268,19 +2592,18 @@
     if (node.enabled === false) tdName.append(badge('已禁用', 'disabled'));
     tr.append(tdName);
     tr.append(nodeGroupsCell(node));
-
     tr.append(nodeEgressCell(node));
 
-    var tdCountry = el('td', 'cell-nowrap');
+    var tdCountry = nodeCell('country', 'cell-nowrap');
     tdCountry.append(document.createTextNode(countryLabel(geo.country)));
     tr.append(tdCountry);
 
-    var tdCity = el('td', 'cell-nowrap');
+    var tdCity = nodeCell('city', 'cell-nowrap');
     tdCity.append(document.createTextNode(geo.city || '—'));
     if (geo.region && geo.region !== geo.city) tdCity.append(el('span', 'cell-sub', geo.region));
     tr.append(tdCity);
 
-    var tdASN = el('td', 'cell-nowrap');
+    var tdASN = nodeCell('asn', 'cell-nowrap');
     if (geo.asn) {
       tdASN.append(el('span', 'cell-code', 'AS' + geo.asn));
       if (geo.asn_org) tdASN.append(el('span', 'cell-sub', geo.asn_org));
@@ -2289,36 +2612,55 @@
     }
     tr.append(tdASN);
 
-    tr.append(el('td', 'cell-nowrap', node.isp_label || geo.isp || '—'));
-    tr.append(el('td', 'col-num cell-nowrap', String(node.weight === undefined || node.weight === null ? '—' : node.weight)));
-    tr.append(el('td', 'col-num cell-nowrap', fmtNum(node.inflight)));
-    var tdLatency = el('td', 'col-num cell-nowrap', fmtLatency(node.latency_ewma_ms));
+    var tdISP = nodeCell('isp', 'cell-nowrap');
+    tdISP.textContent = node.isp_label || geo.isp || '—';
+    tr.append(tdISP);
+
+    var tdWeight = nodeCell('weight', 'col-num cell-nowrap');
+    tdWeight.textContent = String(node.weight === undefined || node.weight === null ? '—' : node.weight);
+    tr.append(tdWeight);
+
+    var tdInflight = nodeCell('inflight', 'col-num cell-nowrap');
+    tdInflight.textContent = fmtNum(node.inflight);
+    tr.append(tdInflight);
+
+    var tdLatency = nodeCell('latency', 'col-num cell-nowrap');
+    tdLatency.textContent = fmtLatency(node.latency_ewma_ms);
     tr.append(tdLatency);
-    var tdBytes = el('td', 'col-num cell-nowrap');
+
+    var tdBytes = nodeCell('bytes', 'col-num cell-nowrap');
     var totalBytes = (Number(node.bytes_in) || 0) + (Number(node.bytes_out) || 0);
     tdBytes.textContent = fmtBytes(totalBytes);
     tdBytes.title = '入 ' + fmtBytes(node.bytes_in) + ' / 出 ' + fmtBytes(node.bytes_out);
     tr.append(tdBytes);
-    var tdBreaker = el('td', 'cell-nowrap');
+
+    var tdBreaker = nodeCell('breaker', 'cell-nowrap');
     tdBreaker.append(breakerBadge(node.breaker_state));
     tr.append(tdBreaker);
-    tr.append(el('td', 'cell-code cell-nowrap', node.version || '—'));
 
-    var tdTransport = el('td', 'cell-nowrap');
+    var tdVersion = nodeCell('version', 'cell-code cell-nowrap');
+    tdVersion.textContent = node.version || '—';
+    tr.append(tdVersion);
+
+    var tdTransport = nodeCell('transport', 'cell-nowrap');
     tdTransport.append(transportBadge(node.transport || ''));
     if (node.planes) tdTransport.append(el('span', 'cell-sub', '×' + node.planes + ' 平面'));
     tr.append(tdTransport);
 
-    var tdOnline = el('td', 'cell-nowrap');
+    var tdOnline = nodeCell('online', 'cell-nowrap');
     if (node.online) tdOnline.append(badge('在线', 'online'));
     else tdOnline.append(badge('离线', 'offline'));
     tr.append(tdOnline);
 
-    var tdActions = el('td', 'col-actions');
+    tr.append(nodeUpdateCell(node));
+
+    var tdActions = nodeCell('actions', 'col-actions');
     var actions = el('span', 'row-actions');
     actions.append(btn('编辑', { small: true, action: 'nodes-edit', id: node.id }));
     actions.append(btn('拨测', { small: true, action: 'nodes-probe', id: node.id }));
     actions.append(btn('安装', { small: true, action: 'nodes-install', id: node.id }));
+    var updateBtn = nodeUpdateActionButton(node);
+    if (updateBtn) actions.append(updateBtn);
     var kickBtn = btn('下线', { small: true, variant: 'btn-danger-ghost', action: 'nodes-kick', id: node.id });
     if (!node.online) kickBtn.disabled = true;
     actions.append(kickBtn);
@@ -2331,12 +2673,14 @@
     var tbody = $('nodes-tbody');
     if (!tbody) return;
     if (!state.nodes.items.length) {
-      emptyRow(tbody, NODE_COLUMNS, '没有匹配的节点。可调整筛选条件，或确认节点客户端是否已启动。');
+      emptyRow(tbody, nodeVisibleColumnCount(), '没有匹配的节点。可调整筛选条件，或确认节点客户端是否已启动。');
+      refreshNodesUpdateAllButton();
       return;
     }
     var frag = document.createDocumentFragment();
     state.nodes.items.forEach(function (node) { frag.append(nodeRow(node)); });
     tbody.replaceChildren(frag);
+    refreshNodesUpdateAllButton();
   }
 
   function updateNodesPager() {
@@ -2454,6 +2798,62 @@
         return api('/nodes/' + enc(node.id) + '/kick', { method: 'POST', body: body }).then(function () {
           closeModal();
           toast('已强制下线节点 ' + (node.alias || node.id), 'success');
+          return loadNodes();
+        });
+      }
+    });
+  }
+
+  function openNodeUpdate(id) {
+    var node = findNode(id);
+    if (!node) {
+      toast('节点不在当前列表中，请刷新后重试。', 'warn');
+      return;
+    }
+    var meta = nodeUpdateMeta(node);
+    if (!meta.canUpdate) {
+      toast('该节点当前不可更新：' + (meta.active
+        ? '更新正在进行中'
+        : (!node.online ? '节点离线' : '节点运行方式不支持在线更新')), 'warn');
+      return;
+    }
+    var name = node.alias || node.id;
+    confirmDialog({
+      title: '更新节点 · ' + name,
+      message: '确定将节点「' + name + '」更新到最新版本吗？',
+      note: '更新会替换节点二进制并重启进程，节点会短暂离线，现有连接可能中断；更新期间请勿重复操作。',
+      confirmText: '开始更新',
+      busyText: '正在下发…',
+      onConfirm: function () {
+        return api('/nodes/' + enc(node.id) + '/update', { method: 'POST', body: {} }).then(function () {
+          toast('已下发更新指令，节点将短暂离线；稍后可自动刷新查看更新状态', 'success');
+          return loadNodes();
+        });
+      }
+    });
+  }
+
+  function updateAllNodes() {
+    var count = 0;
+    if (state.nodes.loaded) {
+      state.nodes.items.forEach(function (node) {
+        if (nodeUpdateMeta(node).canUpdate) count++;
+      });
+    }
+    if (!count) {
+      toast('当前页没有可更新的二进制节点', 'warn');
+      return;
+    }
+    confirmDialog({
+      title: '批量更新可更新节点',
+      message: '确定触发可更新节点的批量更新吗？',
+      note: '后端会滚动执行更新，相关节点会短暂离线，更新期间连接可能中断。' +
+        '当前页检测到 ' + count + ' 个可更新节点。',
+      confirmText: '开始批量更新',
+      busyText: '正在下发…',
+      onConfirm: function () {
+        return api('/nodes/update', { method: 'POST', body: {} }).then(function () {
+          toast('已触发批量更新，节点会滚动更新并短暂离线；可稍后刷新查看更新状态', 'success');
           return loadNodes();
         });
       }
@@ -4404,6 +4804,9 @@
     'nodes-kick': function (target) { openNodeKick(target.dataset.id); },
     'nodes-probe': function (target) { openNodeProbe(target.dataset.id); },
     'nodes-install': function (target) { openNodeInstall(target.dataset.id); },
+    'nodes-update': function (target) { openNodeUpdate(target.dataset.id); },
+    'nodes-update-all': function () { updateAllNodes(); },
+    'nodes-columns-toggle': function () { toggleNodeColumnsMenu(); },
     'groups-new': function () { openGroupForm(null); },
     'groups-edit': function (target) {
       var group = findGroup(target.dataset.id);
@@ -4497,6 +4900,11 @@
         closeModal();
         return;
       }
+      var columnsPopover = $('nodes-columns-popover');
+      if (columnsPopover && !columnsPopover.hidden) {
+        closeNodeColumnsMenu();
+        return;
+      }
       if (document.body.classList.contains('app-nav-open')) {
         document.body.classList.remove('app-nav-open');
         var toggle = qs('[data-action="toggle-nav"]');
@@ -4540,8 +4948,15 @@
     });
 
     document.addEventListener('click', onDelegatedClick);
+    document.addEventListener('click', function (ev) {
+      var picker = $('nodes-column-picker');
+      var popover = $('nodes-columns-popover');
+      if (!picker || !popover || popover.hidden) return;
+      if (!picker.contains(ev.target)) setNodeColumnsMenuOpen(false);
+    });
     document.addEventListener('keydown', onGlobalKeydown);
     window.addEventListener('hashchange', onRouteChange);
+    window.addEventListener('resize', syncNodesViewportOffset);
     document.addEventListener('visibilitychange', onVisibilityChange);
   }
 
@@ -4583,6 +4998,8 @@
   function init() {
     bindStaticEvents();
     renderAccessTokenNote();
+    applyNodeColumnVisibility();
+    syncNodesViewportOffset();
     bootSession();
   }
 

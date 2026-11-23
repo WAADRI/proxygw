@@ -384,6 +384,14 @@ type Agent struct {
 
 	replacedMu sync.Mutex
 	replacedAt []time.Time
+
+	updateMu      sync.Mutex
+	updateStatus  protocol.UpdateStatus
+	updateRunning bool
+	updatePending atomic.Bool
+	updateExit    chan struct{}
+	runtimeEnv    string
+	updateCapable bool
 }
 
 // New validates the options, resolves the timing table and builds an Agent. It
@@ -460,6 +468,9 @@ func New(opts Options) (*Agent, error) {
 	if cfg.Transport == model.TransportWS || opts.QUICDial == nil {
 		a.sel.preferred = transport.KindWS
 	}
+	a.updateExit = make(chan struct{})
+	a.runtimeEnv, a.updateCapable = detectRuntime()
+	a.loadUpdateStatus()
 	if cfg.Transport == model.TransportAuto && opts.QUICDial == nil && opts.WSDial != nil {
 		a.sel.lastFallbackReason = "QUIC 拨号器不可用（未注入），使用 wss"
 		a.log.Warn("auto 模式下未注入 QUIC 拨号器，直接使用 wss", "event", "transport.fallback")
@@ -677,6 +688,8 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.log.Error("致命错误，停止重连并退出", "event", "agent.fatal", "error", err)
 	case <-a.stopCh:
 		a.log.Info("服务端要求停机，进入优雅退出", "event", "agent.stop", "reason", "kick_shutdown")
+	case <-a.updateExit:
+		a.log.Info("更新准备完成，退出进程交给 helper 替换二进制", "event", "agent.update_exit")
 	case <-a.forceCh:
 		a.log.Info("Close 被调用，强制退出", "event", "agent.stop", "reason", "close")
 	}

@@ -48,8 +48,10 @@ type PlaneMeta struct {
 	EgressV4   string
 	EgressV6   string
 	// Capabilities and Compression are negotiated during HELLO.
-	Capabilities []string
-	Compression  bool
+	Capabilities  []string
+	Compression   bool
+	Runtime       string
+	UpdateCapable bool
 }
 
 type planeState struct {
@@ -210,6 +212,8 @@ func (r *Registry) AttachPlane(meta PlaneMeta) (model.Node, uint32, error) {
 		n.Capabilities = append([]string(nil), meta.Capabilities...)
 	}
 	n.Compression = meta.Compression
+	n.Runtime = clampString(meta.Runtime, 16)
+	n.UpdateCapable = meta.UpdateCapable
 	n.Planes = len(ns.planes)
 	n.Online = true
 	n.LastHeartbeat = now
@@ -322,6 +326,12 @@ func (r *Registry) UpdateStats(nodeID string, st protocol.Stats) {
 	if st.Transport != "" {
 		n.Transport = st.Transport
 	}
+	if st.Runtime != "" {
+		n.Runtime = clampString(st.Runtime, 16)
+	}
+	if st.Update != nil {
+		r.applyNodeUpdateLocked(n, st.Update)
+	}
 	egressChanged := false
 	if st.EgressV4 != "" && st.EgressV4 != n.EgressIP.V4 {
 		n.EgressIP.V4 = st.EgressV4
@@ -339,6 +349,54 @@ func (r *Registry) UpdateStats(nodeID string, st protocol.Stats) {
 	n.UpdatedAt = now
 	if egressChanged {
 		r.recomputeLocked()
+	}
+}
+
+// UpdateNodeUpdate applies an immediate UPDATE_STATUS frame from a node.
+func (r *Registry) UpdateNodeUpdate(nodeID string, st protocol.UpdateStatus) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
+	ns := r.nodes[nodeID]
+	if ns == nil {
+		return
+	}
+	r.applyNodeUpdateLocked(&ns.node, &st)
+	ns.node.UpdatedAt = time.Now()
+}
+
+func (r *Registry) applyNodeUpdateLocked(n *model.Node, st *protocol.UpdateStatus) {
+	if st == nil {
+		return
+	}
+	state := clampString(strings.TrimSpace(st.State), 32)
+	if state == "" {
+		state = protocol.UpdateIdle
+	}
+	updatedAt := time.Now()
+	if st.UpdatedAt > 0 {
+		updatedAt = time.UnixMilli(st.UpdatedAt)
+	}
+	n.Update = &model.NodeUpdate{
+		State:          state,
+		CurrentVersion: clampString(st.CurrentVersion, 64),
+		TargetVersion:  clampString(st.TargetVersion, 64),
+		Progress:       st.Progress,
+		Message:        clampString(st.Message, 256),
+		Error:          clampString(st.Error, 1024),
+		UpdatedAt:      updatedAt,
+	}
+	if st.Progress < 0 {
+		n.Update.Progress = 0
+	}
+	if st.Progress > 100 {
+		n.Update.Progress = 100
 	}
 }
 

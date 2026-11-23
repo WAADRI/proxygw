@@ -216,6 +216,8 @@ func (s *Server) buildRoutes() []routeEntry {
 		route(http.MethodPatch, "/api/v1/nodes/{id}", s.handleNodePatch),
 		route(http.MethodPost, "/api/v1/nodes/{id}/kick", s.handleNodeKick),
 		route(http.MethodPost, "/api/v1/nodes/{id}/probe", s.handleNodeProbe),
+		route(http.MethodPost, "/api/v1/nodes/{id}/update", s.handleNodeUpdate),
+		route(http.MethodPost, "/api/v1/nodes/update", s.handleNodesUpdate),
 		route(http.MethodGet, "/api/v1/nodes/{id}/install-command", s.handleInstallCommand),
 
 		// Node groups.
