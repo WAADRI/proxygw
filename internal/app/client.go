@@ -191,6 +191,10 @@ func (c *Client) Close() error { return c.agent.Close() }
 // Status exposes the live agent status for logs / a future client panel.
 func (c *Client) Status() nodeagent.Status { return c.agent.Status() }
 
+// UpdatePending reports whether the agent exited so a helper can replace the
+// executable. The process supervisor must not reconnect the old binary.
+func (c *Client) UpdatePending() bool { return c.agent.UpdatePending() }
+
 // ClientID returns the stable node id used in HELLO.
 func (c *Client) ClientID() string { return c.clientID }
 
