@@ -13,7 +13,7 @@ import (
 // the node process exit. Under systemd we prefer a transient scope: a direct
 // child would be killed together with the old service cgroup when the service
 // stops.
-func startUpdateHelper(path string, args []string) error {
+func startUpdateHelper(path string, args []string, _ string) error {
 	if _, err := os.Stat("/run/systemd/system"); err == nil {
 		if systemdRun, err := exec.LookPath("systemd-run"); err == nil {
 			scopeArgs := []string{

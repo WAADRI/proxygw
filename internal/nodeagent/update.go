@@ -244,12 +244,13 @@ func (a *Agent) runUpdate(cmd protocol.UpdateCommand) {
 		"-update-version", staged.Version,
 		"-update-cwd", workDir,
 	}
-	if service := detectUpdateService(); service != "" {
-		helperArgs = append(helperArgs, "-update-service", service)
-		a.log.Info("节点运行在 Windows 服务下，helper 将停止/启动服务完成替换",
-			"event", "update.service", "service", service)
+	serviceName := detectUpdateService()
+	if serviceName != "" {
+		helperArgs = append(helperArgs, "-update-service", serviceName)
+		a.log.Info("节点运行在 Windows 服务下，helper 将通过外部计划任务启动",
+			"event", "update.service", "service", serviceName)
 	}
-	if err := startUpdateHelper(helperPath, helperArgs); err != nil {
+	if err := startUpdateHelper(helperPath, helperArgs, serviceName); err != nil {
 		a.failUpdate(fmt.Errorf("启动更新 helper 失败: %w", err))
 		return
 	}

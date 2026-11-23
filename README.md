@@ -212,13 +212,13 @@ UPDATE_PROXIES='https://gh-proxy.com/{url}'
 
 Windows 裸二进制也支持该流程（helper 从状态目录运行，不锁住目标 `.exe`）。更新命令本身不携带任意 URL，节点只从配置的 GitHub 仓库/代理获取并校验 Release。
 
-**Windows 服务（NSSM / sc.exe）**：节点会从注册表 `SYSTEM\CurrentControlSet\Services\<name>\Parameters` 的 `Application`（NSSM）或 `ImagePath`（sc.exe）自动识别启动当前二进制的服务。helper 会先停止该服务、等待旧进程退出、替换二进制，再启动服务；helper 使用 `CREATE_BREAKAWAY_FROM_JOB` 启动，避免被 NSSM 的服务进程树一起结束。若自动识别失败，可在服务环境变量中设置：
+**Windows 服务（NSSM / sc.exe）**：节点会从注册表 `SYSTEM\CurrentControlSet\Services\<name>\Parameters` 的 `Application`（NSSM）或 `ImagePath`（sc.exe）自动识别启动当前二进制的服务。helper 会先停止该服务、等待旧进程退出、替换二进制，再启动服务。Windows 服务节点上的 helper 不再作为服务子进程启动，而是通过一次性 Windows 计划任务以 SYSTEM 身份运行，因此 NSSM 停止服务时不会把 helper 一起结束；任务执行完成后自动删除。若自动识别失败，可在服务环境变量中设置：
 
 ```text
 UPDATE_SERVICE_NAME=<Windows 服务名>
 ```
 
-执行更新的服务账号需要对目标服务有启动/停止权限（LocalSystem 通常满足）。如果服务停止阶段失败，更新会标记为 `failed`，不会替换当前二进制。
+执行更新的服务账号需要能创建一次性计划任务（LocalSystem 通常满足）。如果计划任务创建失败，更新会标记为 `failed`，不会停止服务或替换当前二进制。
 
 更新协议帧：`0x16 UPDATE`（服务端→节点指令）、`0x17 UPDATE_STATUS`（节点→服务端状态）。
 
