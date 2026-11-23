@@ -3809,7 +3809,7 @@
     var tbody = $('sticky-tbody');
     if (!tbody) return;
     if (!state.sticky.items.length) {
-      emptyRow(tbody, 8, '还没有粘性黑名单规则。');
+      emptyRow(tbody, 9, '还没有粘性黑名单规则。');
       return;
     }
     var frag = document.createDocumentFragment();
@@ -3819,6 +3819,11 @@
       tdEnabled.append(rule.enabled ? badge('启用', 'enabled') : badge('禁用', 'disabled'));
       tr.append(tdEnabled);
       tr.append(el('td', 'col-name', rule.note || '—'));
+      var tdSource = el('td');
+      var sourceWrap = el('span', 'cell-chips');
+      (rule.source_cidrs || []).forEach(function (c) { sourceWrap.append(el('span', 'tag', c)); });
+      tdSource.append((rule.source_cidrs || []).length ? sourceWrap : el('span', 'cell-sub', '—'));
+      tr.append(tdSource);
       var target = rule.target || {};
       var tdCIDR = el('td');
       var cidrWrap = el('span', 'cell-chips');
@@ -3861,6 +3866,11 @@
     var target = current.target || {};
     var enabled = checkField({ label: '启用该规则', name: 'enabled', value: current.enabled !== false });
     var note = field({ label: '备注', name: 'note', value: current.note || '', placeholder: '可选，如「银行相关目标不走粘性」' });
+    var sourceCIDRs = field({
+      label: '来源 IP/CIDR', name: 'source_cidrs', type: 'textarea', rows: 2,
+      value: joinList(current.source_cidrs, '\n'),
+      hint: '来自这些客户端 IP 的请求不使用粘性；逗号/换行分隔，如 203.0.113.7、203.0.113.0/24'
+    });
     var cidrs = field({
       label: '目标 CIDR', name: 'cidrs', type: 'textarea', rows: 3,
       value: joinList(target.cidrs, '\n'),
@@ -3885,13 +3895,14 @@
 
     formModal({
       title: isEdit ? '编辑粘性黑名单规则' : '新建粘性黑名单规则',
-      note: '目标维度（CIDR/域名）与节点维度（节点组/节点 ID）任一命中，即在该请求上禁用会话粘性。',
-      fields: [enabled, note, cidrs, domains, nodeGroups, nodeIDs],
+      note: '来源 IP/CIDR、目标维度（CIDR/域名）与节点维度（节点组/节点 ID）任一命中，即在该请求上禁用会话粘性。',
+      fields: [enabled, note, sourceCIDRs, cidrs, domains, nodeGroups, nodeIDs],
       submitText: isEdit ? '保存' : '创建',
       onSubmit: function () {
         var payload = {
           enabled: enabled.checked,
           note: note.value.trim(),
+          source_cidrs: splitList(sourceCIDRs.value),
           target: {
             cidrs: splitList(cidrs.value),
             domains: splitList(domains.value)
@@ -3935,11 +3946,13 @@
     var host = ($('sticky-preview-host').value || '').trim();
     var ip = ($('sticky-preview-ip').value || '').trim();
     var port = ($('sticky-preview-port').value || '').trim();
+    var sourceIP = ($('sticky-preview-source') && $('sticky-preview-source').value || '').trim();
     var nodeID = ($('sticky-preview-node').value || '').trim();
     var groups = splitList($('sticky-preview-groups').value);
     if (host) payload.host = host;
     if (ip) payload.ip = ip;
     if (port) payload.port = toInt(port, 0);
+    if (sourceIP) payload.source_ip = sourceIP;
     if (nodeID) payload.node_id = nodeID;
     if (groups.length) payload.groups = groups;
     resultEl.hidden = false;

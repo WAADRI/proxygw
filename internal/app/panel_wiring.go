@@ -297,8 +297,8 @@ func (a *geoAPIAdapter) TestProvider(ctx context.Context, name string, ip net.IP
 
 type schedAPIAdapter struct{ srv *Server }
 
-func (a *schedAPIAdapter) PreviewSticky(target model.RequestTarget, nodeID string, groups []string) panel.StickyPreview {
-	ruleID, hit := a.srv.StickyPreview(target, nodeID, groups)
+func (a *schedAPIAdapter) PreviewSticky(target model.RequestTarget, sourceIP, nodeID string, groups []string) panel.StickyPreview {
+	ruleID, hit := a.srv.StickyPreview(target, sourceIP, nodeID, groups)
 	return panel.StickyPreview{Hit: hit, RuleID: ruleID, ForcedNodeID: ""}
 }
 

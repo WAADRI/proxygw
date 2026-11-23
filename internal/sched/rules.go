@@ -49,12 +49,13 @@ func (p domainPattern) domainMatches(host string) bool {
 
 // compiledRule is the immutable, validated form of a model.StickyRule.
 type compiledRule struct {
-	id        string
-	enabled   bool
-	cidrs     []*net.IPNet
-	domains   []domainPattern
-	nodeIDs   map[string]struct{}
-	nodeGroup []string
+	id          string
+	enabled     bool
+	cidrs       []*net.IPNet
+	domains     []domainPattern
+	sourceCIDRs []*net.IPNet
+	nodeIDs     map[string]struct{}
+	nodeGroup   []string
 }
 
 // ruleSet is an immutable list of compiled sticky rules, swapped atomically by
@@ -121,29 +122,55 @@ func ruleNodeHits(r *compiledRule, node *model.Node, extraGroups []string) bool 
 	return false
 }
 
+// ruleSourceHits reports whether the rule's source-IP dimension matches.
+func ruleSourceHits(r *compiledRule, sourceIP net.IP) bool {
+	if sourceIP == nil {
+		return false
+	}
+	for _, cidr := range r.sourceCIDRs {
+		if cidr.Contains(sourceIP) {
+			return true
+		}
+	}
+	return false
+}
+
 // explain walks the rules in order and returns the first enabled rule whose
-// target or node dimension hits. node may be nil, in which case only the target
-// dimension and the extra nodeGroups are evaluated.
-func (rs *ruleSet) explain(target model.RequestTarget, node *model.Node, nodeGroups []string) (string, bool) {
+// source, target or node dimension hits. node may be nil; nodeGroups may carry
+// additional group IDs.
+func (rs *ruleSet) explain(sourceIP string, target model.RequestTarget, node *model.Node, nodeGroups []string) (string, string, bool) {
 	if rs == nil {
-		return "", false
+		return "", "", false
 	}
 	view := makeTargetView(target)
+	ip := net.ParseIP(normalizeHost(sourceIP))
 	for i := range rs.rules {
 		r := &rs.rules[i]
 		if !r.enabled {
 			continue
 		}
-		if view.hits(r) || ruleNodeHits(r, node, nodeGroups) {
-			return r.id, true
+		if ruleSourceHits(r, ip) {
+			return r.id, "source", true
+		}
+		if view.hits(r) {
+			return r.id, "target", true
+		}
+		if ruleNodeHits(r, node, nodeGroups) {
+			return r.id, "node", true
 		}
 	}
-	return "", false
+	return "", "", false
+}
+
+// matchRequest evaluates source + target dimensions for one request.
+func (rs *ruleSet) matchRequest(sourceIP string, target model.RequestTarget) (ruleID, dimension string, hit bool) {
+	return rs.explain(sourceIP, target, nil, nil)
 }
 
 // matchTarget evaluates only the target dimension of the enabled rules.
 func (rs *ruleSet) matchTarget(target model.RequestTarget) (string, bool) {
-	return rs.explain(target, nil, nil)
+	ruleID, _, hit := rs.explain("", target, nil, nil)
+	return ruleID, hit
 }
 
 // matchNode evaluates the target dimension (empty target never hits) plus the
@@ -152,7 +179,8 @@ func (rs *ruleSet) matchNode(node *model.Node, extraGroups []string) (string, bo
 	if node == nil {
 		return "", false
 	}
-	return rs.explain(model.RequestTarget{}, node, extraGroups)
+	ruleID, _, hit := rs.explain("", model.RequestTarget{}, node, extraGroups)
+	return ruleID, hit
 }
 
 // compileStickyRules validates and compiles a rule list. The returned set is
@@ -183,6 +211,17 @@ func compileStickyRules(rules []model.StickyRule) (*ruleSet, error) {
 				return nil, fmt.Errorf("sched: sticky rule %s: target domain: %w", where, err)
 			}
 			cr.domains = append(cr.domains, dp)
+		}
+		for _, raw := range src.SourceCIDRs {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
+			ipnet, err := parseTargetCIDR(raw)
+			if err != nil {
+				return nil, fmt.Errorf("sched: sticky rule %s: source cidr: %w", where, err)
+			}
+			cr.sourceCIDRs = append(cr.sourceCIDRs, ipnet)
 		}
 		for _, id := range src.NodeIDs {
 			id = strings.TrimSpace(id)

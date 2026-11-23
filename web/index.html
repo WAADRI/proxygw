@@ -334,13 +334,14 @@
           <h3>粘性黑名单</h3>
           <button type="button" class="btn btn-primary btn-sm" data-action="sticky-new">新建规则</button>
         </div>
-        <p class="muted small">目标维度（CIDR / 域名）或节点维度（节点组 / 节点 ID）任一命中即生效，优先级高于会话粘性。</p>
+        <p class="muted small">来源 IP/CIDR、目标维度（CIDR / 域名）或节点维度（节点组 / 节点 ID）任一命中即生效，优先级高于会话粘性；来源维度用于让指定客户端 IP 不使用粘性。</p>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
                 <th>启用</th>
                 <th class="col-name">备注</th>
+                <th>来源 IP/CIDR</th>
                 <th>目标 CIDR</th>
                 <th>目标域名</th>
                 <th>节点组</th>
@@ -356,6 +357,10 @@
         <div class="sub-card">
           <div class="card-head"><h4>试算命中</h4></div>
           <form id="sticky-preview-form" class="inline-form" novalidate>
+            <div class="form-field">
+              <label for="sticky-preview-source">来源 IP</label>
+              <input id="sticky-preview-source" type="text" placeholder="如 203.0.113.7" spellcheck="false">
+            </div>
             <div class="form-field">
               <label for="sticky-preview-host">目标域名</label>
               <input id="sticky-preview-host" type="text" placeholder="如 bank.example.com" spellcheck="false">

@@ -167,6 +167,48 @@ func TestACLForcedList(t *testing.T) {
 	}
 }
 
+// TestStickySourceIPRuleCRUD checks the source-IP dimension accepted by the
+// panel API and sent to the scheduler.
+func TestStickySourceIPRuleCRUD(t *testing.T) {
+	env := newTestEnv(t)
+	client := env.loginClient(t)
+
+	var created model.StickyRule
+	status := client.doJSON(http.MethodPost, "/api/v1/rules/sticky", map[string]any{
+		"note":         "source bypass",
+		"enabled":      true,
+		"source_cidrs": []string{"203.0.113.7", "2001:db8::/32"},
+	}, &created)
+	if status != http.StatusOK {
+		t.Fatalf("create source rule status=%d", status)
+	}
+	if len(created.SourceCIDRs) != 2 || created.SourceCIDRs[0] != "203.0.113.7" {
+		t.Fatalf("created source_cidrs=%v", created.SourceCIDRs)
+	}
+	env.sched.mu.Lock()
+	synced := append([]model.StickyRule(nil), env.sched.lastRules...)
+	env.sched.mu.Unlock()
+	if len(synced) != 1 || len(synced[0].SourceCIDRs) != 2 {
+		t.Fatalf("scheduler source rules=%+v", synced)
+	}
+
+	client.doJSON(http.MethodPost, "/api/v1/rules/sticky/preview", map[string]any{
+		"source_ip": "203.0.113.7",
+		"host":      "example.com",
+		"port":      443,
+	}, nil)
+
+	resp, data := client.do(http.MethodPost, "/api/v1/rules/sticky/preview", map[string]any{
+		"source_ip": "not-an-ip",
+		"host":      "example.com",
+		"port":      443,
+	})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("invalid source ip status=%d body=%s", resp.StatusCode, data)
+	}
+	client.mustStatus(http.MethodDelete, "/api/v1/rules/sticky/"+created.ID, nil, http.StatusOK)
+}
+
 // TestStickyCRUDAndSync checks sticky rule CRUD, scheduler hot reload and the
 // dry-run preview.
 func TestStickyCRUDAndSync(t *testing.T) {

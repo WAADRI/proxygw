@@ -185,13 +185,14 @@ func (s *Selector) Select(req Request, candidates []*model.Node) (*model.Node, D
 	rules := s.currentRules()
 
 	// 1. Sticky blacklist beats every binding: a matching request is never
-	// pinned, but it still takes part in normal scheduling.
-	if ruleID, hit := rules.matchTarget(req.Target); hit {
+	// pinned, but it still takes part in normal scheduling. Source IP, target
+	// and node are independent dimensions; the first matching dimension wins.
+	if ruleID, dimension, hit := rules.matchRequest(req.SourceIP, req.Target); hit {
 		d.Blacklisted = true
 		d.BlacklistRule = ruleID
 		d.Reason = ReasonStickyBlacklist
 		s.sticky.remove(key)
-		audits = append(audits, blacklistAudit(ruleID, "target", key, "", req))
+		audits = append(audits, blacklistAudit(ruleID, dimension, key, "", req))
 	}
 
 	if !d.Blacklisted {
@@ -467,7 +468,14 @@ func (s *Selector) currentRules() *ruleSet {
 // without touching bindings. node may be nil; nodeGroups may carry additional
 // group IDs (for example the groups a credential is authorized for).
 func (s *Selector) StickyExplain(target model.RequestTarget, node *model.Node, nodeGroups []string) (ruleID string, hit bool) {
-	return s.currentRules().explain(target, node, nodeGroups)
+	return s.StickyExplainSource("", target, node, nodeGroups)
+}
+
+// StickyExplainSource evaluates the blacklist with a request source IP. It is
+// used by the panel preview for source-IP rules.
+func (s *Selector) StickyExplainSource(sourceIP string, target model.RequestTarget, node *model.Node, nodeGroups []string) (ruleID string, hit bool) {
+	ruleID, _, hit = s.currentRules().explain(sourceIP, target, node, nodeGroups)
+	return ruleID, hit
 }
 
 // BreakerState returns the current circuit breaker state of a node

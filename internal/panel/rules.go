@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"net"
 	"net/http"
 	"strings"
 
@@ -217,20 +218,22 @@ type stickyListResponse struct {
 
 // stickyRuleRequest is the create/update body for sticky rules.
 type stickyRuleRequest struct {
-	Enabled    *bool             `json:"enabled"`
-	Note       *string           `json:"note"`
-	Target     *model.TargetSpec `json:"target"`
-	NodeGroups *[]string         `json:"node_groups"`
-	NodeIDs    *[]string         `json:"node_ids"`
+	Enabled     *bool             `json:"enabled"`
+	Note        *string           `json:"note"`
+	Target      *model.TargetSpec `json:"target"`
+	SourceCIDRs *[]string         `json:"source_cidrs"`
+	NodeGroups  *[]string         `json:"node_groups"`
+	NodeIDs     *[]string         `json:"node_ids"`
 }
 
 // stickyPreviewRequest is the POST /rules/sticky/preview body.
 type stickyPreviewRequest struct {
-	Host   string   `json:"host"`
-	IP     string   `json:"ip"`
-	Port   int      `json:"port"`
-	NodeID string   `json:"node_id"`
-	Groups []string `json:"groups"`
+	Host     string   `json:"host"`
+	IP       string   `json:"ip"`
+	Port     int      `json:"port"`
+	SourceIP string   `json:"source_ip"`
+	NodeID   string   `json:"node_id"`
+	Groups   []string `json:"groups"`
 }
 
 // stickyPreviewResponse is the preview result.
@@ -251,6 +254,9 @@ func (req *stickyRuleRequest) apply(rule *model.StickyRule) {
 	}
 	if req.Target != nil {
 		rule.Target = *req.Target
+	}
+	if req.SourceCIDRs != nil {
+		rule.SourceCIDRs = *req.SourceCIDRs
 	}
 	if req.NodeGroups != nil {
 		rule.NodeGroups = *req.NodeGroups
@@ -367,12 +373,17 @@ func (s *Server) handleStickyPreview(w http.ResponseWriter, r *http.Request) {
 	if host == "" {
 		host = strings.TrimSpace(req.IP)
 	}
+	sourceIP := strings.TrimSpace(req.SourceIP)
+	if sourceIP != "" && net.ParseIP(sourceIP) == nil {
+		s.writeValidationError(w, "来源 IP 非法", fieldError{Field: "source_ip", Message: "期望 IPv4/IPv6 地址"})
+		return
+	}
 	target := model.RequestTarget{
 		Protocol: model.ProtoHTTP,
 		Host:     host,
 		Port:     req.Port,
 	}
-	preview := s.opts.Sched.PreviewSticky(target, strings.TrimSpace(req.NodeID), req.Groups)
+	preview := s.opts.Sched.PreviewSticky(target, sourceIP, strings.TrimSpace(req.NodeID), req.Groups)
 	resp := stickyPreviewResponse{
 		Hit:          preview.Hit,
 		RuleID:       preview.RuleID,
@@ -404,6 +415,9 @@ func stickyNoteFromRule(rule model.StickyRule) string {
 	}
 	if len(rule.Target.CIDRs) > 0 {
 		parts = append(parts, "CIDR "+strings.Join(rule.Target.CIDRs, ","))
+	}
+	if len(rule.SourceCIDRs) > 0 {
+		parts = append(parts, "来源 "+strings.Join(rule.SourceCIDRs, ","))
 	}
 	if len(rule.NodeGroups) > 0 {
 		parts = append(parts, "节点组 "+strings.Join(rule.NodeGroups, ","))

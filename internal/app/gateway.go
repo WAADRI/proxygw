@@ -373,12 +373,12 @@ func (a *limiterAdapter) Up(credentialID, nodeID string) proxy.ByteLimiter {
 }
 
 // StickyPreview implements the panel preview endpoint.
-func (s *Server) StickyPreview(target model.RequestTarget, nodeID string, nodeGroups []string) (ruleID string, hit bool) {
+func (s *Server) StickyPreview(target model.RequestTarget, sourceIP, nodeID string, nodeGroups []string) (ruleID string, hit bool) {
 	if s.gateway == nil {
 		return "", false
 	}
 	n := &model.Node{ID: nodeID, Groups: nodeGroups}
-	return s.gateway.sched.StickyExplain(target, n, nodeGroups)
+	return s.gateway.sched.StickyExplainSource(sourceIP, target, n, nodeGroups)
 }
 
 // ReloadRules recompiles ACL/scheduler rules after an operator change.

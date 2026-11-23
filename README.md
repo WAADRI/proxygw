@@ -33,7 +33,7 @@
 | 传输层 | `Transport` 接口抽象；QUIC（默认主用）与 WebSocket 回退共享同一套流语义；同一端口 UDP/QUIC + TCP/wss；2s 回退与 1/2/4…10 分钟退避；多平面（默认 2，1–8）按哈希分流；会话/流状态机与统一超时规范对齐 |
 | 代理入口 | HTTP absolute-form 普通转发、CONNECT、Upgrade/101 透传、keep-alive、分块传输；SOCKS5（RFC1928/1929，仅 CONNECT）；三入口共用同一条认证→授权→选点→建流→转发管线 |
 | 授权 | 凭据多套、argon2id、组绑定、fail-closed（组内无节点返回 503，绝不回退全部节点）、禁用/过期即时踢会话、来源 CIDR/协议/并发/带宽限制 |
-| 调度 | random / least_inflight / fastest / weighted(SWRR)；会话粘性（TTL 滑动、每节点 key 上限）；粘性黑名单（目标与节点两维度，优先级最高）；熔断 closed/open/half_open；令牌桶限流；响应首字节前透明重试一次 |
+| 调度 | random / least_inflight / fastest / weighted(SWRR)；会话粘性（TTL 滑动、每节点 key 上限）；粘性黑名单（来源 IP、目标与节点三维度，优先级最高）；熔断 closed/open/half_open；令牌桶限流；响应首字节前透明重试一次 |
 | 节点元数据 | 出口 IP 三级来源（手工 > 隧道对端 > https 回声）；出口去重与「独立出口 IP 数」；MMDB + preset/template/schema 三层归属地 provider（禁止格式嗅探）；字段级 source；SSRF 防护；provider 测试按钮；节点拨测（ping/tcping/http/dns）；DNS 专项转发 |
 | 面板 | 登录（argon2id + JWT + 登录限速/锁定 + 可选 TOTP）、总览三指标、节点/组/凭据/规则 CRUD、运行设置热更+撤销、审计查询、SSE 实时推送 + 3s 轮询兜底 |
 | 可观测 | Prometheus 指标（请求/失败/延迟/连接/在线/唯一出口/隧道/熔断/限流/重试）、结构化 slog、`/healthz`、`/version`（ldflags 注入）、15 分钟内存趋势、Webhook 告警 |
@@ -421,7 +421,7 @@ sudo ./scripts/install-node.sh --server https://gw.example.com:443 \
 5. **pin 模式的 `InsecureSkipVerify`**：Go 的 `crypto/tls` 只会在 `InsecureSkipVerify=true` 时才调用 `VerifyPeerCertificate`；pin 模式必须设置它并**同时**实现强制 SPKI 比对，否则无法在无 CA 场景校验自签证书。这不是「跳过校验」，`ca` 模式禁止该标志。
 6. **节点鉴权**：支持 per-node 令牌（sha256 哈希常量时间比较、面板/API 即时吊销）与 mTLS（ca 模式 + require client cert）。推荐组合使用：配置了令牌时，mTLS 连接**同时**校验令牌（证书身份+令牌双因素，避免任一受信证书冒充任意 node_id）；纯 mTLS 部署可不配令牌。首启自动生成的共享令牌为**一次性注册令牌**：首次认证后绑定到该 node_id 并持久化，其他 node_id 复用会被拒绝；显式配置 `node_id: "*"` 的静态令牌才是共享秘密模式（启动日志告警，生产不推荐）。
 7. **组语义**：成员 =（选择器匹配 ∪ nodes_add）− nodes_remove；空选择器不匹配任何节点（避免「显式列表组」意外包含全网节点）；凭据未绑定任何组 = 全部节点；绑定组但组内无在线节点 = fail-closed 503。
-8. **粘性黑名单**：目标维度与节点维度任一命中即生效，优先级高于粘性；面板提供「试算命中哪条规则」。
+8. **粘性黑名单**：来源 IP/CIDR、目标维度与节点维度任一命中即生效，优先级高于粘性；来源维度用于让指定客户端 IP 不使用粘性；面板提供「试算命中哪条规则」。
 9. **0-RTT**：协议与 QUIC 配置开启 0-RTT 会话恢复，但数据流必须等握手确认；控制流允许 0-RTT。本版未实现 QUIC 0-RTT 完整回放防护之外的业务优化，README 明确标注。
 10. **PROXY protocol v2**：服务端在 CDN/LB 之后时从 PROXY 头取真实源/对端地址；未启用时使用 TCP 对端地址。
 11. **透明重试**：仅在向客户端提交响应首字节前重试（HTTP 状态行未写、CONNECT 未回 200、SOCKS5 未回成功），最多按 `settings.scheduler.retry.max_attempts` 换节点；已提交后绝不重试。

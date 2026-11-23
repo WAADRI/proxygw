@@ -203,7 +203,7 @@ type fakeSched struct {
 	previews  int
 }
 
-func (f *fakeSched) PreviewSticky(target model.RequestTarget, nodeID string, groupIDs []string) StickyPreview {
+func (f *fakeSched) PreviewSticky(target model.RequestTarget, sourceIP, nodeID string, groupIDs []string) StickyPreview {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.previews++

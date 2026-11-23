@@ -234,6 +234,71 @@ func TestStickyBlacklistDisabledRule(t *testing.T) {
 	}
 }
 
+func TestStickyBlacklistSourceCIDR(t *testing.T) {
+	ts := newTestSettingsWith(func(s *model.Settings) {
+		s.Scheduler.Strategy = model.StrategyLeastInflight
+		s.Scheduler.Sticky.TTL = model.D(time.Hour)
+	})
+	clk := newFakeClock()
+	rec := &auditRecorder{}
+	sel := newTestSelector(t, ts, clk, 24, rec)
+	mustSetRules(t, sel, model.StickyRule{
+		ID:          "source-rule",
+		Enabled:     true,
+		SourceCIDRs: []string{"203.0.113.0/24", "2001:db8::/32"},
+	})
+	candidates := makeNodes("a")
+	req := Request{CredentialID: "cred", SourceIP: "203.0.113.9"}
+	req.Target = model.RequestTarget{Host: "example.com", Port: 443}
+
+	if _, d, err := sel.Select(req, candidates); err != nil {
+		t.Fatalf("Select: %v", err)
+	} else if !d.Blacklisted || d.BlacklistRule != "source-rule" || d.Reason != ReasonStickyBlacklist {
+		t.Fatalf("source IP blacklist not applied: %+v", d)
+	}
+	if stats := sel.StickyStats(); stats.Keys != 0 {
+		t.Fatalf("source-blacklisted request created %d binding(s)", stats.Keys)
+	}
+	detail, _ := rec.last(EventStickyBlacklisted)
+	if detail["dimension"] != "source" || detail["source_ip"] != "203.0.113.9" {
+		t.Fatalf("source blacklist audit detail = %v", detail)
+	}
+
+	// IPv6 source is matched too.
+	req.SourceIP = "2001:db8::5"
+	if _, d, err := sel.Select(req, candidates); err != nil || !d.Blacklisted {
+		t.Fatalf("IPv6 source blacklist: blacklisted=%v err=%v", d.Blacklisted, err)
+	}
+
+	// A different source IP is allowed to use normal stickiness.
+	req.SourceIP = "198.51.100.9"
+	if _, d, err := sel.Select(req, candidates); err != nil {
+		t.Fatalf("Select: %v", err)
+	} else if d.Blacklisted {
+		t.Fatalf("unrelated source got blacklisted: %+v", d)
+	}
+	if _, d, err := sel.Select(req, candidates); err != nil || !d.StickyHit {
+		t.Fatalf("non-blacklisted source was not bound: hit=%v err=%v", d.StickyHit, err)
+	}
+}
+
+func TestStickyBlacklistSourceRulePreview(t *testing.T) {
+	sel := newTestSelector(t, newTestSettings(), newFakeClock(), 25, nil)
+	if err := sel.SetStickyRules([]model.StickyRule{{
+		ID:          "source-preview",
+		Enabled:     true,
+		SourceCIDRs: []string{"192.0.2.7"},
+	}}); err != nil {
+		t.Fatalf("SetStickyRules: %v", err)
+	}
+	if ruleID, hit := sel.StickyExplainSource("192.0.2.7", model.RequestTarget{Host: "example.com", Port: 443}, nil, nil); !hit || ruleID != "source-preview" {
+		t.Fatalf("source preview = %q/%v", ruleID, hit)
+	}
+	if _, hit := sel.StickyExplainSource("192.0.2.8", model.RequestTarget{Host: "example.com", Port: 443}, nil, nil); hit {
+		t.Fatal("unrelated source IP hit the source rule")
+	}
+}
+
 func TestStickyBlacklistValidation(t *testing.T) {
 	ts := newTestSettings()
 	clk := newFakeClock()

@@ -250,8 +250,8 @@ func validateACL(list []model.ACLRule) error {
 func validateSticky(list []model.StickyRule) error {
 	for i := range list {
 		r := &list[i]
-		if len(r.Target.CIDRs) == 0 && len(r.Target.Domains) == 0 && len(r.NodeGroups) == 0 && len(r.NodeIDs) == 0 {
-			return fmt.Errorf("sticky[%d]: rule matches nothing (需要至少一个目标或节点维度)", i)
+		if len(r.Target.CIDRs) == 0 && len(r.Target.Domains) == 0 && len(r.SourceCIDRs) == 0 && len(r.NodeGroups) == 0 && len(r.NodeIDs) == 0 {
+			return fmt.Errorf("sticky[%d]: rule matches nothing (需要至少一个来源、目标或节点维度)", i)
 		}
 		if r.Note == "" && r.ID == "" {
 			return fmt.Errorf("sticky[%d]: note is required for new rules", i)

@@ -346,14 +346,15 @@ type TargetSpec struct {
 // StickyRule keeps a target out of session stickiness. Any dimension match
 // (target, node group or explicit node) disables pinning for the request.
 type StickyRule struct {
-	ID         string     `json:"id"`
-	Enabled    bool       `json:"enabled"`
-	Note       string     `json:"note,omitempty"`
-	Target     TargetSpec `json:"target"`
-	NodeGroups []string   `json:"node_groups,omitempty"`
-	NodeIDs    []string   `json:"node_ids,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID          string     `json:"id"`
+	Enabled     bool       `json:"enabled"`
+	Note        string     `json:"note,omitempty"`
+	Target      TargetSpec `json:"target"`
+	SourceCIDRs []string   `json:"source_cidrs,omitempty"` // request source IP/CIDR
+	NodeGroups  []string   `json:"node_groups,omitempty"`
+	NodeIDs     []string   `json:"node_ids,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // ACLRule is one ordered access control rule.

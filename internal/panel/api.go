@@ -151,7 +151,7 @@ type StickyPreview struct {
 // rule changes into the running selector immediately (app adapts it to
 // sched.Selector.SetStickyRules).
 type SchedAPI interface {
-	PreviewSticky(target model.RequestTarget, nodeID string, groups []string) StickyPreview
+	PreviewSticky(target model.RequestTarget, sourceIP, nodeID string, groups []string) StickyPreview
 	SetRules(rules []model.StickyRule) error
 }
 
