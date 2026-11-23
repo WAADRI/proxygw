@@ -21,6 +21,10 @@ type HelperOptions struct {
 	StatusPath  string
 	Version     string
 	WorkDir     string
+	// ServiceName is the Windows service manager name (for example an NSSM
+	// service). When set, the helper stops the service before waiting for the
+	// old process and starts it again after the replacement.
+	ServiceName string
 }
 
 // RunApplyHelper is the child-process side of a node update. It waits for the
@@ -39,6 +43,22 @@ func RunApplyHelper(opts HelperOptions) int {
 		Message:       "等待旧进程退出",
 	}); err != nil {
 		return 1
+	}
+	if opts.ServiceName != "" {
+		_ = writeHelperStatus(opts.StatusPath, protocol.UpdateStatus{
+			State:         protocol.UpdateReplacing,
+			TargetVersion: opts.Version,
+			Progress:      100,
+			Message:       "停止 Windows 服务 " + opts.ServiceName,
+		})
+		if err := stopManagedService(opts.ServiceName); err != nil {
+			_ = writeHelperStatus(opts.StatusPath, protocol.UpdateStatus{
+				State:         protocol.UpdateFailed,
+				TargetVersion: opts.Version,
+				Error:         fmt.Sprintf("停止服务 %s 失败: %v", opts.ServiceName, err),
+			})
+			return 1
+		}
 	}
 	if err := waitParentExit(opts.ParentPID, opts.Target, 90*time.Second); err != nil {
 		_ = writeHelperStatus(opts.StatusPath, protocol.UpdateStatus{
@@ -64,9 +84,7 @@ func RunApplyHelper(opts HelperOptions) int {
 		})
 		return 1
 	}
-	if err := os.Rename(opts.Target, backup); err != nil {
-		// Some systems keep the binary in use but allow rename; if not, the
-		// update cannot proceed safely.
+	if err := renameWithRetry(opts.Target, backup, 30*time.Second); err != nil {
 		_ = writeHelperStatus(opts.StatusPath, protocol.UpdateStatus{
 			State:         protocol.UpdateFailed,
 			TargetVersion: opts.Version,
@@ -79,7 +97,7 @@ func RunApplyHelper(opts HelperOptions) int {
 			_ = os.Rename(backup, opts.Target)
 		}
 	}()
-	if err := os.Rename(stagedTarget, opts.Target); err != nil {
+	if err := renameWithRetry(stagedTarget, opts.Target, 30*time.Second); err != nil {
 		_ = writeHelperStatus(opts.StatusPath, protocol.UpdateStatus{
 			State:         protocol.UpdateFailed,
 			TargetVersion: opts.Version,
@@ -105,7 +123,7 @@ func RunApplyHelper(opts HelperOptions) int {
 		Progress:      100,
 		Message:       "正在重启节点",
 	})
-	if err := restartUpdatedBinary(opts.Target, opts.RestartArgs, opts.WorkDir); err != nil {
+	if err := restartUpdatedBinary(opts.Target, opts.RestartArgs, opts.WorkDir, opts.ServiceName); err != nil {
 		// Roll back on restart failure so the node does not stay offline.
 		_ = os.Remove(opts.Target)
 		_ = os.Rename(backup, opts.Target)
@@ -115,7 +133,7 @@ func RunApplyHelper(opts HelperOptions) int {
 			TargetVersion: opts.Version,
 			Error:         fmt.Sprintf("新版本启动失败，已回滚: %v", err),
 		})
-		_ = restartUpdatedBinary(opts.Target, opts.RestartArgs, opts.WorkDir)
+		_ = restartUpdatedBinary(opts.Target, opts.RestartArgs, opts.WorkDir, opts.ServiceName)
 		return 1
 	}
 	_ = os.Remove(backup)
@@ -148,7 +166,10 @@ func writeHelperStatus(path string, st protocol.UpdateStatus) error {
 	return os.Rename(tmp, path)
 }
 
-func restartUpdatedBinary(target string, args []string, workDir string) error {
+func restartUpdatedBinary(target string, args []string, workDir, serviceName string) error {
+	if serviceName != "" {
+		return startManagedService(serviceName)
+	}
 	if unit := systemdUnit(); unit != "" {
 		if path, err := exec.LookPath("systemctl"); err == nil {
 			if err := exec.Command(path, "restart", unit).Run(); err == nil {

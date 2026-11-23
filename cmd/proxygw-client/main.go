@@ -50,6 +50,7 @@ func run() int {
 		updateStatus  = flag.String("update-status", "", "内部使用：状态文件")
 		updateVersion = flag.String("update-version", "", "内部使用：目标版本")
 		updateCwd     = flag.String("update-cwd", "", "内部使用：重启工作目录")
+		updateService = flag.String("update-service", "", "内部使用：Windows 服务名")
 	)
 	flag.Parse()
 
@@ -62,6 +63,7 @@ func run() int {
 			status:  *updateStatus,
 			version: *updateVersion,
 			cwd:     *updateCwd,
+			service: *updateService,
 		})
 	}
 

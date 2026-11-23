@@ -17,6 +17,7 @@ type updateHelperInvocation struct {
 	status  string
 	version string
 	cwd     string
+	service string
 }
 
 // runUpdateHelper decodes the restart arguments and delegates to the updater
@@ -43,5 +44,6 @@ func runUpdateHelper(inv updateHelperInvocation) int {
 		StatusPath:  inv.status,
 		Version:     inv.version,
 		WorkDir:     inv.cwd,
+		ServiceName: inv.service,
 	})
 }
