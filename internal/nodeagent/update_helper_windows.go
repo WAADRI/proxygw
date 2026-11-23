@@ -18,13 +18,17 @@ import (
 // SYSTEM is outside that tree; the task wrapper deletes the task after the
 // helper exits.
 func startUpdateHelper(path string, args []string, serviceName string) error {
+	absPath := path
+	if abs, err := filepath.Abs(path); err == nil {
+		absPath = abs
+	}
 	if strings.TrimSpace(serviceName) != "" {
-		if err := startScheduledUpdateHelper(path, args); err != nil {
+		if err := startScheduledUpdateHelper(absPath, args); err != nil {
 			return fmt.Errorf("创建更新计划任务失败（服务 %s）: %w", serviceName, err)
 		}
 		return nil
 	}
-	return startDetachedHelper(path, args)
+	return startDetachedHelper(absPath, args)
 }
 
 func startDetachedHelper(path string, args []string) error {
@@ -49,6 +53,9 @@ func startDetachedHelper(path string, args []string) error {
 }
 
 func startScheduledUpdateHelper(path string, args []string) error {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	stateDir := filepath.Dir(path)
 	taskName := fmt.Sprintf("ProxygwUpdate-%d", os.Getpid())
 	batchPath := filepath.Join(stateDir, "proxygw-update-helper.cmd")

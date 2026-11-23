@@ -217,6 +217,16 @@ func (a *Agent) runUpdate(cmd protocol.UpdateCommand) {
 		a.failUpdate(fmt.Errorf("无法创建状态目录: %w", err))
 		return
 	}
+	// The helper runs from a scheduled task whose working directory is
+	// C:\Windows\System32, not the service AppDirectory. All paths passed to it
+	// must therefore be absolute (state_dir is often configured as "state").
+	if abs, aerr := filepath.Abs(stateDir); aerr == nil {
+		stateDir = abs
+	}
+	newBinary := staged.BinaryPath
+	if abs, aerr := filepath.Abs(newBinary); aerr == nil {
+		newBinary = abs
+	}
 	statusPath := filepath.Join(stateDir, updateStatusFile)
 	helperName := updateHelperName
 	if runtime.GOOS == "windows" {
@@ -237,7 +247,7 @@ func (a *Agent) runUpdate(cmd protocol.UpdateCommand) {
 	helperArgs := []string{
 		"-apply-update",
 		"-update-target", target,
-		"-update-new", staged.BinaryPath,
+		"-update-new", newBinary,
 		"-update-pid", fmt.Sprint(os.Getpid()),
 		"-update-args", base64.StdEncoding.EncodeToString(argsJSON),
 		"-update-status", statusPath,
