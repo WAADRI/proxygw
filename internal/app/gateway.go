@@ -34,6 +34,7 @@ type gateway struct {
 	limiter *sched.Limiters
 	audit   *audit.Store
 	panel   *panel.Server
+	authBan *proxy.AuthBanTracker
 
 	httpProxy  *proxy.HTTPProxy
 	socksProxy *proxy.SOCKS5Proxy
@@ -107,6 +108,18 @@ func (s *Server) initGateway() error {
 		limiter: limiters,
 		audit:   auditStore,
 	}
+	authBan := proxy.NewAuthBanTracker(proxy.AuthBanConfig{
+		Enabled:          cfg.Proxy.AuthBan.Enabled,
+		FailureWindow:    cfg.Proxy.AuthBan.FailureWindow.Std(),
+		FailureThreshold: cfg.Proxy.AuthBan.FailureThreshold,
+		BanDuration:      cfg.Proxy.AuthBan.BanDuration.Std(),
+		MaxEntries:       cfg.Proxy.AuthBan.MaxEntries,
+		Exempt:           cfg.Proxy.AuthBan.Exempt,
+	})
+	if authBan != nil {
+		g.authBan = authBan
+		s.authBan = authBan
+	}
 	deps := s.panelDeps
 	opts := proxy.Options{
 		Logger:         logger,
@@ -119,6 +132,7 @@ func (s *Server) initGateway() error {
 		Dialer:         &dialerAdapter{tun: s.tunnel, sel: selector},
 		Limiter:        &limiterAdapter{limiters: limiters},
 		Metrics:        s.metrics,
+		AuthBan:        authBan,
 		MaxHeaderBytes: cfg.Proxy.MaxHeaderBytes,
 		MaxConcurrent:  cfg.Proxy.MaxConcurrent,
 		Audit: func(event string, detail map[string]string) {

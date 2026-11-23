@@ -214,6 +214,30 @@ Windows 裸二进制也支持该流程（helper 从状态目录运行，不锁�
 
 更新协议帧：`0x16 UPDATE`（服务端→节点指令）、`0x17 UPDATE_STATUS`（节点→服务端状态）。
 
+### 代理认证失败 IP 封禁
+
+代理入口在认证失败时会统计来源 IP 的失败次数；窗口内达到阈值后临时封禁，后续连接在 **Argon2 校验之前**直接返回 403，避免错误的密码猜测持续消耗 CPU/内存。
+
+配置在 `proxy.auth_ban`：
+
+```yaml
+proxy:
+  auth_ban:
+    enabled: true
+    failure_window: 5m
+    failure_threshold: 10
+    ban_duration: 30m
+    max_entries: 4096
+    exempt: []          # 永不封禁的 IP/CIDR；回环地址始终豁免
+```
+
+计数范围：
+
+- 计入：缺少代理凭据、认证头格式错误、用户名不存在/密码错误；SOCKS5 无可用认证方法或用户名密码帧错误；
+- 不计入：凭据被禁用/过期、来源 CIDR 不允许、协议不允许、ACL 拒绝、限流、上游连接失败。
+
+面板「连接与规则 → 代理认证封禁」可以查看当前封禁表并手动解除；同时提供 `GET /api/v1/proxy/auth-bans` 和 `DELETE /api/v1/proxy/auth-bans/{ip}`。封禁表只在内存中，进程重启后清空。
+
 ## 隧道协议
 
 ### WebSocket 帧

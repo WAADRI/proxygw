@@ -206,6 +206,8 @@ func (s *Server) buildRoutes() []routeEntry {
 
 		// Overview.
 		route(http.MethodGet, "/api/v1/overview", s.handleOverview),
+		route(http.MethodGet, "/api/v1/proxy/auth-bans", s.handleAuthBanList),
+		route(http.MethodDelete, "/api/v1/proxy/auth-bans/{ip}", s.handleAuthBanUnban),
 
 		// Nodes.
 		route(http.MethodGet, "/api/v1/nodes", s.handleNodesList),

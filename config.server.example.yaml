@@ -29,6 +29,13 @@ proxy:
   auth_mode: required      # none(仅回环) | optional | required（默认 required）
   max_header_bytes: 65536  # 单个请求头最大字节数
   max_concurrent: 0        # 入口全局最大并发连接，0=不限
+  auth_ban:                # 代理认证失败来源 IP 临时封禁；检查发生在密码校验之前
+    enabled: true          # false 可完全关闭
+    failure_window: 5m     # 滑动统计窗口
+    failure_threshold: 10  # 窗口内失败达到该次数后封禁
+    ban_duration: 30m      # 封禁时长
+    max_entries: 4096      # 内存中最多保存的封禁/失败记录数
+    exempt: []             # 永不封禁的 IP/CIDR，例如 ["10.0.0.0/8", "192.0.2.7"]；回环地址始终豁免
 
 tunnel:
   transport: auto   # auto(QUIC+WS 都接受) | quic | ws

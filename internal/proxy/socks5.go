@@ -92,10 +92,19 @@ func (s *SOCKS5Proxy) handleConn(ctx context.Context, conn net.Conn) {
 		p.finishRequest(model.ProtoSOCKS5, "", "", "", "", "", perr.reason, start, perr)
 		return
 	}
+	if perr := p.authBanBlocked(sourceIP, model.ProtoSOCKS5); perr != nil {
+		_ = writeFull(conn, []byte{socks5Version, socks5MethodNone})
+		p.finishRequest(model.ProtoSOCKS5, "", "", "", "", "", perr.reason, start, perr)
+		return
+	}
 	method, ok := s.chooseMethod(methods)
 	if !ok {
 		// No acceptable method: the RFC requires 0xFF and a close.
 		_ = writeFull(conn, []byte{socks5Version, socks5MethodNone})
+		p.auditEvent("proxy.auth_failed", map[string]string{
+			"protocol": model.ProtoSOCKS5, "source_ip": sourceIP, "reason": reasonNoCredential,
+		})
+		p.recordAuthFailure(sourceIP, model.ProtoSOCKS5, reasonNoCredential)
 		p.finishRequest(model.ProtoSOCKS5, "", "", "", "", "", reasonNoCredential, start, errNoCredential())
 		return
 	}
@@ -109,6 +118,10 @@ func (s *SOCKS5Proxy) handleConn(ctx context.Context, conn net.Conn) {
 		username, password, perr := readSocksUserPass(conn, br, t)
 		if perr != nil {
 			writeSocksAuthStatus(conn, t.writeBlock, socks5AuthVersion, 0x01)
+			p.auditEvent("proxy.auth_failed", map[string]string{
+				"protocol": model.ProtoSOCKS5, "source_ip": sourceIP, "reason": reasonAuthMalformed,
+			})
+			p.recordAuthFailure(sourceIP, model.ProtoSOCKS5, reasonAuthMalformed)
 			p.finishRequest(model.ProtoSOCKS5, "", "", "", "", "", perr.reason, start, perr)
 			return
 		}

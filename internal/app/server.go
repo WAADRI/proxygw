@@ -22,6 +22,7 @@ import (
 	"proxygw/internal/metrics"
 	"proxygw/internal/model"
 	"proxygw/internal/nodesauth"
+	"proxygw/internal/proxy"
 	"proxygw/internal/proxyproto"
 	"proxygw/internal/registry"
 	"proxygw/internal/settings"
@@ -48,6 +49,7 @@ type Server struct {
 	panelDeps   *panelDeps
 	hook        *webhook.Sender
 	nodeUpdates *nodeUpdateManager
+	authBan     *proxy.AuthBanTracker
 
 	quicListener transport.Listener
 	wsListener   *transport.WSListener

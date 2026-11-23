@@ -58,6 +58,10 @@ type Options struct {
 	// Audit receives security relevant events (auth failures, ACL denials,
 	// rate limiting). nil disables auditing. It must be safe for concurrent use.
 	Audit func(event string, detail map[string]string)
+	// AuthBan counts credential failures per source IP and temporarily blocks
+	// abusive sources before the expensive credential verification. nil
+	// disables the feature.
+	AuthBan *AuthBanTracker
 	// OnRequestStart is called once per client request after authorization and
 	// node selection, before the tunnel stream is opened. nil-safe.
 	OnRequestStart func(credentialID, protocol, target, nodeID string)

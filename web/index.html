@@ -415,6 +415,31 @@
         <div id="acl-summary" class="summary-bar"></div>
       </article>
 
+      <article class="card">
+        <div class="card-head">
+          <h3>代理认证封禁</h3>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="auth-bans-refresh">刷新</button>
+        </div>
+        <p class="muted small">来源 IP 在窗口内认证失败达到阈值后会被临时封禁；封禁检查发生在密码校验之前。仅统计缺失/格式错误/密码错误的认证失败，凭据禁用/过期不计入。</p>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>来源 IP</th>
+                <th class="col-num">失败次数</th>
+                <th>原因</th>
+                <th>封禁时间</th>
+                <th>到期时间</th>
+                <th>最后尝试</th>
+                <th class="col-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody id="auth-ban-tbody"></tbody>
+          </table>
+        </div>
+        <p id="auth-ban-note" class="muted small"></p>
+      </article>
+
       <details class="card collapsible">
         <summary>强制默认拒绝清单（只读，不可关闭，仅可追加规则）</summary>
         <div id="acl-forced" class="forced-list"></div>

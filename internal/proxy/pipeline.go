@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"proxygw/internal/auth"
 	"proxygw/internal/compress"
 	"proxygw/internal/metrics"
 	"proxygw/internal/model"
@@ -51,6 +52,7 @@ type pipeline struct {
 	authMode string
 
 	authenticator Authenticator
+	authBan       *AuthBanTracker
 	candidates    CandidateResolver
 	selector      Selector
 	acl           ACLChecker
@@ -81,6 +83,7 @@ func newPipeline(opts Options) (*pipeline, error) {
 		settings:       norm.Settings,
 		authMode:       norm.AuthMode,
 		authenticator:  norm.Authenticator,
+		authBan:        norm.AuthBan,
 		candidates:     norm.Candidates,
 		selector:       norm.Selector,
 		acl:            norm.ACL,
@@ -207,14 +210,36 @@ func (p *pipeline) verifyCredential(username, password, protocolName, sourceIP s
 	}
 	cred, err := p.authenticator.Verify(username, password)
 	if err != nil || cred == nil {
+		// A disabled/expired credential is an authorization state, not a
+		// password guess. Classify it separately so it neither looks like
+		// brute-force traffic in audits nor gets the source IP banned.
+		var verr *auth.VerifyError
+		if errors.As(err, &verr) {
+			switch verr.Kind {
+			case auth.VerifyDisabled:
+				p.auditEvent("proxy.credential_rejected", map[string]string{
+					"protocol": protocolName, "source_ip": sourceIP,
+					"username": username, "reason": reasonCredentialDisabled,
+				})
+				return nil, errCredentialDisabled()
+			case auth.VerifyExpired:
+				p.auditEvent("proxy.credential_rejected", map[string]string{
+					"protocol": protocolName, "source_ip": sourceIP,
+					"username": username, "reason": reasonCredentialExpired,
+				})
+				return nil, errCredentialExpired()
+			}
+		}
 		p.auditEvent("proxy.auth_failed", map[string]string{
 			"protocol":  protocolName,
 			"source_ip": sourceIP,
 			"username":  username,
 			"reason":    reasonBadCredential,
 		})
+		p.recordAuthFailure(sourceIP, protocolName, reasonBadCredential)
 		return nil, errBadCredential()
 	}
+	p.recordAuthSuccess(sourceIP)
 	return cred, nil
 }
 
@@ -315,6 +340,7 @@ func (p *pipeline) authenticateHTTP(proxyAuthorization, sourceIP, protocolName s
 		p.auditEvent("proxy.auth_failed", map[string]string{
 			"protocol": protocolName, "source_ip": sourceIP, "reason": reasonAuthMalformed,
 		})
+		p.recordAuthFailure(sourceIP, protocolName, reasonAuthMalformed)
 		return nil, perr
 	}
 	if !hasCreds {
@@ -324,6 +350,7 @@ func (p *pipeline) authenticateHTTP(proxyAuthorization, sourceIP, protocolName s
 		p.auditEvent("proxy.auth_failed", map[string]string{
 			"protocol": protocolName, "source_ip": sourceIP, "reason": reasonNoCredential,
 		})
+		p.recordAuthFailure(sourceIP, protocolName, reasonNoCredential)
 		return nil, errNoCredential()
 	}
 	cred, perr := p.verifyCredential(username, password, protocolName, sourceIP)
@@ -721,6 +748,63 @@ func (p *pipeline) auditEvent(event string, detail map[string]string) {
 		}
 	}()
 	p.audit(event, detail)
+}
+
+// authBanBlocked rejects a source IP before authentication when it is inside an
+// active failure ban.
+func (p *pipeline) authBanBlocked(sourceIP, protocolName string) *proxyError {
+	if p.authBan == nil || strings.TrimSpace(sourceIP) == "" {
+		return nil
+	}
+	remaining, blocked := p.authBan.Blocked(sourceIP)
+	if !blocked {
+		return nil
+	}
+	retryAfter := int(remaining.Seconds())
+	if retryAfter < 1 {
+		retryAfter = 1
+	}
+	p.auditEvent("proxy.auth_blocked", map[string]string{
+		"protocol":            protocolName,
+		"source_ip":           sourceIP,
+		"retry_after_seconds": fmt.Sprint(retryAfter),
+	})
+	return errSourceBanned()
+}
+
+// recordAuthFailure counts one of the countable credential failures. Disabled
+// and expired credentials, source-CIDR rejection and ACL denials are not routed
+// here on purpose.
+func (p *pipeline) recordAuthFailure(sourceIP, protocolName, reason string) {
+	if p.authBan == nil || strings.TrimSpace(sourceIP) == "" {
+		return
+	}
+	banned, banFor, failures := p.authBan.RecordFailure(sourceIP, reason)
+	if !banned {
+		return
+	}
+	seconds := int(banFor.Seconds())
+	p.auditEvent("proxy.source_banned", map[string]string{
+		"protocol":    protocolName,
+		"source_ip":   sourceIP,
+		"reason":      reason,
+		"failures":    fmt.Sprint(failures),
+		"ban_seconds": fmt.Sprint(seconds),
+	})
+	p.logger.Warn("代理来源 IP 因认证失败次数过多被临时封禁",
+		"event", "proxy.source_banned",
+		"source_ip", sourceIP,
+		"protocol", protocolName,
+		"reason", reason,
+		"failures", failures,
+		"ban_seconds", seconds)
+}
+
+func (p *pipeline) recordAuthSuccess(sourceIP string) {
+	if p.authBan == nil || strings.TrimSpace(sourceIP) == "" {
+		return
+	}
+	p.authBan.RecordSuccess(sourceIP)
 }
 
 // limiterUp returns the upload limiter for a stream, or nil.

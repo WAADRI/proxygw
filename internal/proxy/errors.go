@@ -34,6 +34,7 @@ const (
 	reasonShuttingDown          = "shutting_down"
 	reasonAuthMalformed         = "auth_malformed"
 	reasonUnsupportedTarget     = "unsupported_target"
+	reasonSourceBanned          = "source_banned"
 )
 
 // proxyError carries the exact entry protocol representation of a failure: the
@@ -100,6 +101,14 @@ func errCredentialExpired() *proxyError {
 func errProtocolNotAllowed(protocolName string) *proxyError {
 	return newProxyError(403, 0x02, reasonProtocolNotAllowed,
 		fmt.Sprintf("当前凭据不允许使用 %s 代理协议", protocolName), nil)
+}
+
+// errSourceBanned is returned when the source IP exceeded the auth failure
+// threshold. It deliberately does not advertise authentication, so a scanner
+// does not immediately retry with another guessed credential.
+func errSourceBanned() *proxyError {
+	return newProxyError(403, 0x02, reasonSourceBanned,
+		"来源 IP 因代理认证失败次数过多被临时封禁，请稍后重试", nil)
 }
 
 // errSourceNotAllowed is returned when the client source address does not match

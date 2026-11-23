@@ -172,6 +172,7 @@
     sticky: { items: [], loaded: false },
     acl: { items: [], loaded: false, defaultAction: '' },
     aclForced: { items: [], loaded: false },
+    authBans: { items: [], loaded: false, disabled: false },
     audit: { items: [], expanded: new Set(), oldest: null, canMore: false, loaded: false, loading: false },
     cert: null,
     geo: { items: [], loaded: false },
@@ -1156,6 +1157,7 @@
     state.sticky = { items: [], loaded: false };
     state.acl = { items: [], loaded: false, defaultAction: '' };
     state.aclForced = { items: [], loaded: false };
+    state.authBans = { items: [], loaded: false, disabled: false };
     state.audit = { items: [], expanded: new Set(), oldest: null, canMore: false, loaded: false, loading: false };
     state.cert = null;
     state.geo = { items: [], loaded: false };
@@ -3773,6 +3775,10 @@
       api('/rules/acl/forced').then(
         function (data) { return { key: 'forced', ok: true, data: data }; },
         function (err) { return { key: 'forced', ok: false, error: err }; }
+      ),
+      api('/proxy/auth-bans').then(
+        function (data) { return { key: 'authBans', ok: true, data: data }; },
+        function (err) { return { key: 'authBans', ok: false, error: err }; }
       )
     ]).then(function (results) {
       var errors = [];
@@ -3796,11 +3802,94 @@
           state.aclForced.items = Array.isArray(result.data.items) ? result.data.items : [];
           state.aclForced.loaded = true;
           renderForcedACL();
+        } else if (result.key === 'authBans') {
+          state.authBans.items = Array.isArray(result.data.items) ? result.data.items : [];
+          state.authBans.loaded = true;
+          state.authBans.disabled = false;
+          renderAuthBanTable();
         }
       });
+      if (errors.indexOf('authBans') !== -1) {
+        state.authBans.disabled = true;
+        state.authBans.items = [];
+        renderAuthBanTable();
+      }
       if (errors.length) {
-        var labels = { settings: '运行设置', sticky: '粘性黑名单', acl: 'ACL', forced: '强制默认拒绝清单' };
+        var labels = { settings: '运行设置', sticky: '粘性黑名单', acl: 'ACL', forced: '强制默认拒绝清单', authBans: '代理认证封禁' };
         toast('部分规则数据加载失败：' + errors.map(function (k) { return labels[k] || k; }).join('、'), 'warn', 6000);
+      }
+    });
+  }
+
+  function renderAuthBanTable() {
+    var tbody = $('auth-ban-tbody');
+    if (!tbody) return;
+    var note = $('auth-ban-note');
+    if (note) {
+      if (state.authBans.disabled) {
+        note.textContent = '代理认证封禁未启用或服务端未提供该接口。';
+      } else if (!state.authBans.items.length) {
+        note.textContent = '当前没有处于封禁状态的来源 IP。';
+      } else {
+        note.textContent = '共 ' + state.authBans.items.length + ' 个来源 IP 处于封禁状态。';
+      }
+    }
+    if (!state.authBans.items.length) {
+      emptyRow(tbody, 7, state.authBans.disabled ? '代理认证封禁未启用。' : '当前没有封禁记录。');
+      return;
+    }
+    var frag = document.createDocumentFragment();
+    state.authBans.items.forEach(function (ban) {
+      var tr = el('tr');
+      tr.append(el('td', 'cell-code', ban.source_ip || '—'));
+      tr.append(el('td', 'col-num', fmtNum(ban.failures)));
+      tr.append(el('td', 'cell-code', ban.reason || '—'));
+      tr.append(el('td', 'cell-nowrap', fmtDateTime(ban.banned_at)));
+      tr.append(el('td', 'cell-nowrap', fmtDateTime(ban.banned_until)));
+      tr.append(el('td', 'cell-nowrap', fmtDateTime(ban.last_seen)));
+      var tdActions = el('td', 'col-actions');
+      var actions = el('span', 'row-actions');
+      var unban = btn('解除封禁', { small: true, action: 'auth-ban-unban' });
+      unban.dataset.ip = ban.source_ip || '';
+      actions.append(unban);
+      tdActions.append(actions);
+      tr.append(tdActions);
+      frag.append(tr);
+    });
+    tbody.replaceChildren(frag);
+  }
+
+  function refreshAuthBans() {
+    return api('/proxy/auth-bans').then(function (data) {
+      state.authBans.items = Array.isArray(data.items) ? data.items : [];
+      state.authBans.loaded = true;
+      state.authBans.disabled = false;
+      renderAuthBanTable();
+      toast('封禁列表已刷新', 'success', 1800);
+    }).catch(function (err) {
+      if (err && (err.code === 'unavailable' || err.status === 503)) {
+        state.authBans.disabled = true;
+        state.authBans.items = [];
+        renderAuthBanTable();
+        return;
+      }
+      showApiError(err);
+    });
+  }
+
+  function unbanAuthSource(ip) {
+    if (!ip) return;
+    confirmDialog({
+      title: '解除代理认证封禁',
+      message: '确定解除来源 IP ' + ip + ' 的封禁吗？',
+      note: '解除后该 IP 可以立即重新尝试代理认证。',
+      confirmText: '解除封禁',
+      danger: false,
+      onConfirm: function () {
+        return api('/proxy/auth-bans/' + encodeURIComponent(ip), { method: 'DELETE' }).then(function () {
+          toast('已解除封禁：' + ip, 'success');
+          return refreshAuthBans();
+        });
       }
     });
   }
@@ -4867,6 +4956,8 @@
       var rule = findSticky(target.dataset.id);
       if (rule) deleteSticky(rule);
     },
+    'auth-bans-refresh': function () { refreshAuthBans(); },
+    'auth-ban-unban': function (target) { unbanAuthSource(target.dataset.ip); },
     'acl-new': function () { openACLForm(null); },
     'acl-edit': function (target) {
       var rule = findACL(target.dataset.id);

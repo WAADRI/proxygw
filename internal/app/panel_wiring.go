@@ -147,6 +147,7 @@ func (s *Server) initPanel() error {
 		Stats:       &statsAPIAdapter{srv: s},
 		NodeTokens:  s.authn,
 		NodeUpdates: &nodeUpdateAPIAdapter{srv: s},
+		AuthBans:    &authBanAPIAdapter{srv: s},
 		KickCredential: func(credentialID string) int {
 			// The tunnel state machine attachment (9.11) allows in-flight streams
 			// to finish naturally; the panel can still report the live count.

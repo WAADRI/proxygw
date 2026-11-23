@@ -50,6 +50,8 @@ type Options struct {
 	// NodeUpdates drives binary-only node self-updates. Docker nodes are
 	// rejected before this interface is called.
 	NodeUpdates NodeUpdatesAPI
+	// AuthBans lists and clears proxy source-IP authentication bans.
+	AuthBans AuthBansAPI
 	// KickCredential immediately closes every existing proxy session of the
 	// credential and returns how many were kicked. Provided by app.
 	KickCredential func(credentialID string) int
@@ -83,6 +85,22 @@ type NodeTokensAPI interface {
 type NodeUpdatesAPI interface {
 	StartNodeUpdate(nodeID string) error
 	StartRollingUpdate(nodeIDs []string) (int, error)
+}
+
+// AuthBanView is one active proxy authentication ban.
+type AuthBanView struct {
+	SourceIP    string    `json:"source_ip"`
+	Failures    int       `json:"failures"`
+	Reason      string    `json:"reason"`
+	BannedAt    time.Time `json:"banned_at"`
+	BannedUntil time.Time `json:"banned_until"`
+	LastSeen    time.Time `json:"last_seen"`
+}
+
+// AuthBansAPI exposes the proxy auth failure ban table.
+type AuthBansAPI interface {
+	AuthBans() []AuthBanView
+	UnbanAuthBan(sourceIP string) bool
 }
 
 // SessionInfo is one tunnel session as exposed by the tunnel layer.

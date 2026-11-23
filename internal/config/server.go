@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -39,11 +40,24 @@ type ServerListenConfig struct {
 
 // ProxyConfig configures the HTTP and SOCKS5 entry points.
 type ProxyConfig struct {
-	HTTPListen     string `yaml:"http_listen"`
-	SOCKS5Listen   string `yaml:"socks5_listen"`
-	AuthMode       string `yaml:"auth_mode"` // none | optional | required
-	MaxHeaderBytes int    `yaml:"max_header_bytes"`
-	MaxConcurrent  int    `yaml:"max_concurrent"` // 0 = unlimited
+	HTTPListen     string        `yaml:"http_listen"`
+	SOCKS5Listen   string        `yaml:"socks5_listen"`
+	AuthMode       string        `yaml:"auth_mode"` // none | optional | required
+	MaxHeaderBytes int           `yaml:"max_header_bytes"`
+	MaxConcurrent  int           `yaml:"max_concurrent"` // 0 = unlimited
+	AuthBan        AuthBanConfig `yaml:"auth_ban"`
+}
+
+// AuthBanConfig configures temporary source-IP bans after proxy credential
+// authentication failures. Disabled, expired and source-CIDR rejections are not
+// counted; only missing/malformed/wrong credentials are.
+type AuthBanConfig struct {
+	Enabled          bool           `yaml:"enabled"`
+	FailureWindow    model.Duration `yaml:"failure_window"`
+	FailureThreshold int            `yaml:"failure_threshold"`
+	BanDuration      model.Duration `yaml:"ban_duration"`
+	MaxEntries       int            `yaml:"max_entries"`
+	Exempt           []string       `yaml:"exempt"` // source IPs/CIDRs never banned
 }
 
 // TunnelConfig configures the node tunnel layer. Fixed values from the
@@ -189,6 +203,13 @@ func DefaultServerConfig() *ServerConfig {
 			SOCKS5Listen:   DefaultSOCKS5Listen,
 			AuthMode:       model.AuthRequired,
 			MaxHeaderBytes: 64 * 1024,
+			AuthBan: AuthBanConfig{
+				Enabled:          true,
+				FailureWindow:    model.D(5 * time.Minute),
+				FailureThreshold: 10,
+				BanDuration:      model.D(30 * time.Minute),
+				MaxEntries:       4096,
+			},
 		},
 		Tunnel: TunnelConfig{
 			Transport:     model.TransportAuto,
@@ -318,6 +339,33 @@ func (c *ServerConfig) Validate() error {
 	}
 	if c.Proxy.MaxConcurrent < 0 || c.Proxy.MaxConcurrent > 1_000_000 {
 		return fieldErr("proxy.max_concurrent", "must be between 0 and 1000000")
+	}
+	ban := c.Proxy.AuthBan
+	if ban.Enabled {
+		if ban.FailureWindow < model.D(time.Second) || ban.FailureWindow > model.D(24*time.Hour) {
+			return fieldErr("proxy.auth_ban.failure_window", "must be between 1s and 24h")
+		}
+		if ban.FailureThreshold < 1 || ban.FailureThreshold > 10000 {
+			return fieldErr("proxy.auth_ban.failure_threshold", "must be between 1 and 10000")
+		}
+		if ban.BanDuration < model.D(time.Second) || ban.BanDuration > model.D(7*24*time.Hour) {
+			return fieldErr("proxy.auth_ban.ban_duration", "must be between 1s and 168h")
+		}
+		if ban.MaxEntries < 64 || ban.MaxEntries > 1_000_000 {
+			return fieldErr("proxy.auth_ban.max_entries", "must be between 64 and 1000000")
+		}
+		for i, raw := range ban.Exempt {
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
+			if ip := net.ParseIP(raw); ip != nil {
+				continue
+			}
+			if _, _, err := net.ParseCIDR(raw); err != nil {
+				return fieldErr(fmt.Sprintf("proxy.auth_ban.exempt[%d]", i), "invalid IP or CIDR %q", raw)
+			}
+		}
 	}
 	// Tunnel.
 	switch c.Tunnel.Transport {

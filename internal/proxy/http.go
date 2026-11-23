@@ -754,6 +754,13 @@ func (h *HTTPProxy) serveHTTP(ctx context.Context, conn net.Conn, br *bufio.Read
 	start := time.Now()
 	traceID, traceHex := newTrace()
 	sourceIP := remoteIP(conn.RemoteAddr())
+	if perr := p.authBanBlocked(sourceIP, model.ProtoHTTP); perr != nil {
+		track := p.trackRequest(model.ProtoHTTP, "", "")
+		defer track.finish(perr)
+		p.finishRequest(model.ProtoHTTP, traceHex, "", "", "", "", perr.reason, start, perr)
+		h.writeErrorResponse(conn, perr)
+		return false, current
+	}
 	plan, perr := buildRequestPlan(req)
 	if perr != nil {
 		track := p.trackRequest(model.ProtoHTTP, "", "")
@@ -1164,6 +1171,13 @@ func (h *HTTPProxy) serveConnect(ctx context.Context, conn net.Conn, br *bufio.R
 	start := time.Now()
 	traceID, traceHex := newTrace()
 	sourceIP := remoteIP(conn.RemoteAddr())
+	if perr := p.authBanBlocked(sourceIP, model.ProtoConnect); perr != nil {
+		track := p.trackRequest(model.ProtoConnect, "", "")
+		defer track.finish(perr)
+		p.finishRequest(model.ProtoConnect, traceHex, "", "", "", "", perr.reason, start, perr)
+		h.writeErrorResponse(conn, perr)
+		return
+	}
 	host, port, perr := splitAuthority(req.requestURI, 443)
 	if perr == nil {
 		perr = validateTarget(host, port)
