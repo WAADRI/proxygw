@@ -55,6 +55,46 @@ func TestParseIPInfoBody(t *testing.T) {
 	}
 }
 
+func TestParseIPInfoLiteBody(t *testing.T) {
+	body := []byte(`{"ip":"8.8.8.8","asn":"AS15169","as_name":"Google LLC","as_domain":"google.com","country_code":"US","country":"United States","continent_code":"NA","continent":"North America"}`)
+	geo, hits, err := parseIPInfoBody(body)
+	if err != nil {
+		t.Fatalf("parseIPInfoLiteBody: %v", err)
+	}
+	if geo.Country != "US" || geo.ASN != 15169 || geo.ASNOrg != "Google LLC" {
+		t.Fatalf("unexpected lite geo: %+v", geo)
+	}
+	if hits[geoFieldCountry] != "country_code" || hits[geoFieldASN] != "asn" {
+		t.Fatalf("unexpected lite hit paths: %+v", hits)
+	}
+}
+
+func TestParseIPInfoCoreBody(t *testing.T) {
+	body := []byte(`{
+		"ip":"8.8.8.8",
+		"geo":{"city":"Mountain View","region":"California","region_code":"CA","country":"United States","country_code":"US"},
+		"as":{"asn":"AS15169","name":"Google LLC","domain":"google.com"}
+	}`)
+	geo, _, err := parseIPInfoBody(body)
+	if err != nil {
+		t.Fatalf("parseIPInfoCoreBody: %v", err)
+	}
+	if geo.Country != "US" || geo.Region != "California" || geo.City != "Mountain View" || geo.ASN != 15169 || geo.ASNOrg != "Google LLC" {
+		t.Fatalf("unexpected core geo: %+v", geo)
+	}
+}
+
+func TestParseIPInfoLegacyBody(t *testing.T) {
+	body := []byte(`{"ip":"8.8.8.8","city":"Mountain View","region":"California","country":"US","org":"AS15169 Google LLC"}`)
+	geo, _, err := parseIPInfoBody(body)
+	if err != nil {
+		t.Fatalf("parseIPInfoLegacyBody: %v", err)
+	}
+	if geo.Country != "US" || geo.City != "Mountain View" || geo.ASN != 15169 {
+		t.Fatalf("unexpected legacy geo: %+v", geo)
+	}
+}
+
 func TestParseIPAPIBody(t *testing.T) {
 	body := []byte(`{"status":"success","countryCode":"US","regionName":"California","city":"Mountain View","as":"AS15169 Google LLC","isp":"Google LLC","query":"8.8.8.8"}`)
 	geo, hits, err := parseIPAPIBody(body)
@@ -144,12 +184,22 @@ func TestBuildProviderTargetURL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildProviderTargetURL: %v", err)
 		}
-		if got != "https://ipinfo.io/8.8.8.8/json" {
+		if got != "https://api.ipinfo.io/lite/8.8.8.8" {
 			t.Fatalf("URL = %q", got)
 		}
 	})
 
-	t.Run("ipinfo without placeholder appends path", func(t *testing.T) {
+	t.Run("ipinfo new api without placeholder appends path", func(t *testing.T) {
+		got, err := buildProviderTargetURL(newProvider(providerKindPreset, presetIPInfo, "https://api.ipinfo.io/lite", ""), ip)
+		if err != nil {
+			t.Fatalf("buildProviderTargetURL: %v", err)
+		}
+		if got != "https://api.ipinfo.io/lite/8.8.8.8" {
+			t.Fatalf("URL = %q", got)
+		}
+	})
+
+	t.Run("ipinfo legacy host without placeholder appends /json", func(t *testing.T) {
 		got, err := buildProviderTargetURL(newProvider(providerKindPreset, presetIPInfo, "https://ipinfo.io", ""), ip)
 		if err != nil {
 			t.Fatalf("buildProviderTargetURL: %v", err)

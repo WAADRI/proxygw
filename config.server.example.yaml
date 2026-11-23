@@ -139,7 +139,8 @@ geo:
     timeout: 2s
   providers:
     # preset：内置固定解析器，只需 URL（可选 token）；支持 {ip} 占位符。
-    # type: preset, preset: ipinfo
+    # ipinfo 新版 API（Lite/Core）需要 token；旧版 ipinfo.io/{ip}/json 仍兼容。
+    # type: preset, preset: ipinfo（默认 https://api.ipinfo.io/lite/{ip}）
     # type: preset, preset: ip-api
     # type: preset, preset: ipwho.is
     # type: preset, preset: cloudflare
@@ -147,8 +148,8 @@ geo:
     - name: ipinfo
       type: preset
       preset: ipinfo
-      url: "https://ipinfo.io/{ip}/json"
-      token: ""
+      url: "https://api.ipinfo.io/lite/{ip}"
+      token: ""                 # IPinfo token；新版 API 必填
       enabled: false
       priority: 10
     # template：用户自填 URL + 声明式字段映射（禁止自动嗅探格式）。

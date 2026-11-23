@@ -413,6 +413,28 @@ func (s *Server) handleNodeUpdate(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "node_id": nodeID})
 }
 
+// handleNodeUpdateClear removes a stale node update status. The node reports its
+// update state again on the next STATS frame, so this is mainly for a node that
+// was updated manually or whose old helper left a "replacing" state behind.
+func (s *Server) handleNodeUpdateClear(w http.ResponseWriter, r *http.Request) {
+	nodeID := strings.TrimSpace(r.PathValue("id"))
+	if nodeID == "" {
+		s.writeError(w, http.StatusBadRequest, "invalid_node_id", "节点 ID 不能为空", nil)
+		return
+	}
+	if s.opts.NodeUpdates == nil {
+		s.writeUnavailable(w, "节点更新")
+		return
+	}
+	if !s.opts.NodeUpdates.ClearNodeUpdateStatus(nodeID) {
+		s.writeError(w, http.StatusNotFound, "not_found", "节点不存在", nil)
+		return
+	}
+	s.auditRequest(r, "node.update_clear", nodeID, "ok", nil)
+	s.notify()
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true, "node_id": nodeID})
+}
+
 // handleNodesUpdate queues a rolling update over all eligible binary nodes.
 func (s *Server) handleNodesUpdate(w http.ResponseWriter, r *http.Request) {
 	if s.opts.NodeUpdates == nil {

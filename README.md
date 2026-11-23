@@ -338,7 +338,7 @@ proxy:
 
 - 出口 IP 优先级：节点手工 `egress.manual_v4/v6` > 服务端看到的隧道对端地址 > 节点请求 https IP 回声端点（IPv4/IPv6 分别探测，2s 超时，失败降级）。IP 回声端点只做固定规则提取（纯文本第一个合法 IP / JSON `ip` 字段 / cloudflare trace `ip=` 行），无需配置映射。
 - 「IP 回声」与「归属地查询」是两个独立配置项；归属地查询采用三层 provider，**禁止自动嗅探响应格式**：
-  - `preset`：内置适配器 `ipinfo` / `ip-api` / `ipwho.is` / `cloudflare` / 本地 MMDB；
+  - `preset`：内置适配器 `ipinfo` / `ip-api` / `ipwho.is` / `cloudflare` / 本地 MMDB；`ipinfo` 默认使用新版 `https://api.ipinfo.io/lite/{ip}`（需要 token，返回 `country_code`/`asn`/`as_name`），也兼容旧版 `https://ipinfo.io/{ip}/json` 和 Core `/lookup` 的嵌套响应；
   - 本地 MMDB 同时兼容 **MaxMind GeoLite2/GeoIP2 嵌套结构**、**IPinfo Lite / IPLocate 等扁平结构**（如 `country` 为国家全名、`country_code` 为 ISO 代码、`asn` 为 `AS15169`）以及 **Merged-IP 的嵌套 `asn` 对象**；单个字段类型不符不会再让整条 lookup 失败；
   - 城市/地区名称语言由 `geo.mmdb_name_language` 控制（如 `zh-CN`，缺失时回退英文）；国家显示仍由 ISO 代码在前端映射中文；
   - **纯真 qqwry.ipdb 是 IPDB 格式，不能直接作为 MMDB 使用**；需要中文城市/ASN 时建议用 Merged-IP.mmdb（GeoLite2 + IPinfo + DB-IP + QQWry 合并，含中文名称与 ASN）；

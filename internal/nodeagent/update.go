@@ -83,6 +83,23 @@ func (a *Agent) loadUpdateStatus() {
 	a.updateMu.Lock()
 	a.updateStatus = st
 	a.updateMu.Unlock()
+	// A transient helper state read by a freshly started node means the
+	// previous update did not finish (for example the helper was killed by a
+	// service manager). Convert it to a terminal failure instead of showing
+	// "replacing" forever in the panel.
+	switch st.State {
+	case protocol.UpdateChecking, protocol.UpdateDownloading, protocol.UpdateVerified,
+		protocol.UpdateWaitingRestart, protocol.UpdateReplacing, protocol.UpdateRestarting:
+		a.updateMu.Lock()
+		a.updateStatus = protocol.UpdateStatus{
+			State:          protocol.UpdateFailed,
+			CurrentVersion: a.version,
+			TargetVersion:  st.TargetVersion,
+			Error:          "上次更新未完成：节点已重启但未完成替换",
+			UpdatedAt:      protocol.NowMillis(),
+		}
+		a.updateMu.Unlock()
+	}
 }
 
 func (a *Agent) updateStatusSnapshot() *protocol.UpdateStatus {

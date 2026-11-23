@@ -85,6 +85,7 @@ type NodeTokensAPI interface {
 type NodeUpdatesAPI interface {
 	StartNodeUpdate(nodeID string) error
 	StartRollingUpdate(nodeIDs []string) (int, error)
+	ClearNodeUpdateStatus(nodeID string) bool
 }
 
 // AuthBanView is one active proxy authentication ban.

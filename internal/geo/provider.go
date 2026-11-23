@@ -32,7 +32,7 @@ const (
 // Default preset endpoints. Users may override the URL (and token) in the
 // provider configuration; "{ip}" is substituted with the node egress IP.
 const (
-	defaultIPInfoURL            = "https://ipinfo.io/{ip}/json"
+	defaultIPInfoURL            = "https://api.ipinfo.io/lite/{ip}"
 	defaultIPAPIURL             = "https://ip-api.com/json/{ip}?fields=status,countryCode,regionName,city,as,isp,query"
 	defaultIPWhoisURL           = "https://ipwho.is/{ip}"
 	defaultCloudflareTraceURL   = "https://cloudflare.com/cdn-cgi/trace"
@@ -357,7 +357,13 @@ func appendIPPath(raw, preset, ipText string) (string, error) {
 	base := strings.TrimRight(u.Path, "/")
 	switch preset {
 	case presetIPInfo:
-		u.Path = base + "/" + ipText + "/json"
+		// New IPinfo API: /lite/<ip> or /lookup/<ip>. Legacy ipinfo.io
+		// endpoints use /<ip>/json.
+		if strings.EqualFold(u.Host, "api.ipinfo.io") || strings.HasSuffix(strings.ToLower(u.Host), ".ipinfo.io") && strings.HasPrefix(strings.ToLower(u.Host), "api.") {
+			u.Path = base + "/" + ipText
+		} else {
+			u.Path = base + "/" + ipText + "/json"
+		}
 	case presetIPAPI, presetIPWhois:
 		u.Path = base + "/" + ipText
 	default:
@@ -517,16 +523,34 @@ func parsePresetBody(preset string, body []byte) (model.Geo, map[string]string, 
 	}
 }
 
-// ipinfoResponse is the fixed response shape of ipinfo.io/.../json (unknown
-// fields are ignored by the decoder).
+// ipinfoResponse covers both the legacy ipinfo.io/<ip>/json shape and the new
+// api.ipinfo.io Lite (/lite) / Core (/lookup) shapes. Unknown fields are
+// ignored by the decoder.
 type ipinfoResponse struct {
-	IP      string `json:"ip"`
-	Country string `json:"country"`
-	Region  string `json:"region"`
-	City    string `json:"city"`
-	Org     string `json:"org"`
-	Bogon   bool   `json:"bogon"`
-	Error   *struct {
+	IP          string `json:"ip"`
+	Country     string `json:"country"`
+	CountryCode string `json:"country_code"`
+	Region      string `json:"region"`
+	RegionCode  string `json:"region_code"`
+	City        string `json:"city"`
+	Org         string `json:"org"`
+	ASN         string `json:"asn"`
+	ASName      string `json:"as_name"`
+	ASDomain    string `json:"as_domain"`
+	Geo         *struct {
+		City        string `json:"city"`
+		Region      string `json:"region"`
+		RegionCode  string `json:"region_code"`
+		Country     string `json:"country"`
+		CountryCode string `json:"country_code"`
+	} `json:"geo"`
+	AS *struct {
+		ASN    string `json:"asn"`
+		Name   string `json:"name"`
+		Domain string `json:"domain"`
+	} `json:"as"`
+	Bogon bool `json:"bogon"`
+	Error *struct {
 		Title   string `json:"title"`
 		Message string `json:"message"`
 	} `json:"error"`
@@ -543,26 +567,77 @@ func parseIPInfoBody(body []byte) (model.Geo, map[string]string, error) {
 	if wire.Bogon {
 		return model.Geo{}, nil, errors.New("ipinfo: address is a bogon (reserved/private) address")
 	}
-	geo := model.Geo{Country: wire.Country, Region: wire.Region, City: wire.City}
 	hitPaths := map[string]string{}
-	if geo.Country != "" {
-		hitPaths[geoFieldCountry] = "country"
+	geo := model.Geo{}
+	setCountry := func(value, path string) {
+		if geo.Country != "" {
+			return
+		}
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		geo.Country = strings.ToUpper(value)
+		hitPaths[geoFieldCountry] = path
 	}
-	if geo.Region != "" {
+	// New API responses carry the ISO code in country_code and a display name
+	// in country. Prefer the ISO code; legacy responses only have country.
+	setCountry(wire.CountryCode, "country_code")
+	setCountry(wire.Country, "country")
+	if wire.Geo != nil {
+		setCountry(wire.Geo.CountryCode, "geo.country_code")
+		setCountry(wire.Geo.Country, "geo.country")
+		if wire.Region == "" {
+			wire.Region = wire.Geo.Region
+		}
+		if wire.RegionCode == "" {
+			wire.RegionCode = wire.Geo.RegionCode
+		}
+		if wire.City == "" {
+			wire.City = wire.Geo.City
+		}
+	}
+	if region := strings.TrimSpace(wire.Region); region != "" {
+		geo.Region = region
 		hitPaths[geoFieldRegion] = "region"
 	}
-	if geo.City != "" {
+	if city := strings.TrimSpace(wire.City); city != "" {
+		geo.City = city
 		hitPaths[geoFieldCity] = "city"
+	}
+	asnText := strings.TrimSpace(wire.ASN)
+	asName := strings.TrimSpace(wire.ASName)
+	if wire.AS != nil {
+		if asnText == "" {
+			asnText = strings.TrimSpace(wire.AS.ASN)
+		}
+		if asName == "" {
+			asName = strings.TrimSpace(wire.AS.Name)
+		}
+	}
+	if asnText != "" {
+		if asn, err := model.NormalizeASN(asnText); err == nil {
+			geo.ASN = asn
+			hitPaths[geoFieldASN] = "asn"
+		}
 	}
 	if org := strings.TrimSpace(wire.Org); org != "" {
 		asn, orgName := splitASNOrg(org)
-		if asn > 0 {
+		if geo.ASN == 0 && asn > 0 {
 			geo.ASN = asn
 			hitPaths[geoFieldASN] = "org"
 		}
-		if orgName != "" {
-			geo.ASNOrg = orgName
-			hitPaths[geoFieldASNOrg] = "org"
+		if asName == "" && orgName != "" {
+			asName = orgName
+			if geo.ASNOrg == "" {
+				hitPaths[geoFieldASNOrg] = "org"
+			}
+		}
+	}
+	if asName != "" {
+		geo.ASNOrg = asName
+		if hitPaths[geoFieldASNOrg] == "" {
+			hitPaths[geoFieldASNOrg] = "as_name"
 		}
 	}
 	if geo.IsZero() {

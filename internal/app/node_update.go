@@ -168,3 +168,7 @@ func (a *nodeUpdateAPIAdapter) StartNodeUpdate(nodeID string) error {
 func (a *nodeUpdateAPIAdapter) StartRollingUpdate(nodeIDs []string) (int, error) {
 	return a.srv.nodeUpdates.StartRollingUpdate(nodeIDs)
 }
+
+func (a *nodeUpdateAPIAdapter) ClearNodeUpdateStatus(nodeID string) bool {
+	return a.srv.registry.ClearNodeUpdate(nodeID)
+}

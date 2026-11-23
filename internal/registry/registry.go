@@ -400,6 +400,27 @@ func (r *Registry) applyNodeUpdateLocked(n *model.Node, st *protocol.UpdateStatu
 	}
 }
 
+// ClearNodeUpdate removes a stale node update status. It is used by the panel
+// when a node was updated manually or an old helper left a transient state.
+func (r *Registry) ClearNodeUpdate(nodeID string) bool {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
+	ns := r.nodes[nodeID]
+	if ns == nil {
+		return false
+	}
+	ns.node.Update = nil
+	ns.node.UpdatedAt = time.Now()
+	return true
+}
+
 // Get returns a snapshot of one node.
 func (r *Registry) Get(nodeID string) (model.Node, bool) {
 	nodeID = strings.TrimSpace(nodeID)

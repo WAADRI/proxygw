@@ -89,7 +89,7 @@
 
   var ACTION_LABELS = {
     login: '登录', logout: '退出登录', 'login.failed': '登录失败',
-    'node.kick': '强制下线节点', 'node.update': '更新节点',
+    'node.kick': '强制下线节点', 'node.update': '更新节点', 'node.update_clear': '清除节点更新状态',
     'node.enable': '启用节点', 'node.disable': '禁用节点',
     'node.probe': '节点拨测', 'node.online': '节点上线', 'node.offline': '节点离线',
     'credential.create': '创建凭据', 'credential.update': '更新凭据',
@@ -2538,6 +2538,17 @@
 
   // 仅 runtime=binary 且在线、update_capable 不为 false 的节点提供可用更新按钮；
   // 更新进行中时按钮禁用并显示「更新中」。
+  function nodeUpdateClearButton(node) {
+    var meta = nodeUpdateMeta(node);
+    if (!meta.update || !meta.state || meta.state === 'idle' || meta.state === 'success') return null;
+    return btn('清除状态', {
+      small: true,
+      action: 'nodes-update-clear',
+      id: node.id,
+      title: '清除面板中的更新状态；不会改变节点上的二进制，适用于手动更新后或旧 helper 卡住的状态'
+    });
+  }
+
   function nodeUpdateActionButton(node) {
     var meta = nodeUpdateMeta(node);
     if (meta.active) {
@@ -2661,6 +2672,8 @@
     actions.append(btn('编辑', { small: true, action: 'nodes-edit', id: node.id }));
     actions.append(btn('拨测', { small: true, action: 'nodes-probe', id: node.id }));
     actions.append(btn('安装', { small: true, action: 'nodes-install', id: node.id }));
+    var clearBtn = nodeUpdateClearButton(node);
+    if (clearBtn) actions.append(clearBtn);
     var updateBtn = nodeUpdateActionButton(node);
     if (updateBtn) actions.append(updateBtn);
     var kickBtn = btn('下线', { small: true, variant: 'btn-danger-ghost', action: 'nodes-kick', id: node.id });
@@ -2856,6 +2869,24 @@
       onConfirm: function () {
         return api('/nodes/update', { method: 'POST', body: {} }).then(function () {
           toast('已触发批量更新，节点会滚动更新并短暂离线；可稍后刷新查看更新状态', 'success');
+          return loadNodes();
+        });
+      }
+    });
+  }
+
+  function clearNodeUpdateStatus(id) {
+    var node = findNode(id);
+    if (!node) return;
+    confirmDialog({
+      title: '清除节点更新状态',
+      message: '清除节点 ' + id + ' 在面板中的更新状态？',
+      note: '只清除服务端记录，不会替换或重启节点二进制。节点重新上报 STATS 后可能再次出现更新状态。',
+      confirmText: '清除状态',
+      danger: false,
+      onConfirm: function () {
+        return api('/nodes/' + encodeURIComponent(id) + '/update', { method: 'DELETE' }).then(function () {
+          toast('已清除节点更新状态', 'success');
           return loadNodes();
         });
       }
@@ -4907,6 +4938,7 @@
     'nodes-probe': function (target) { openNodeProbe(target.dataset.id); },
     'nodes-install': function (target) { openNodeInstall(target.dataset.id); },
     'nodes-update': function (target) { openNodeUpdate(target.dataset.id); },
+    'nodes-update-clear': function (target) { clearNodeUpdateStatus(target.dataset.id); },
     'nodes-update-all': function () { updateAllNodes(); },
     'nodes-columns-toggle': function () { toggleNodeColumnsMenu(); },
     'groups-new': function () { openGroupForm(null); },
