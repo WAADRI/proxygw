@@ -126,9 +126,9 @@
       <div class="stat-grid">
         <div class="stat-card"><span class="stat-label">累计请求</span><strong id="stat-requests">—</strong></div>
         <div class="stat-card"><span class="stat-label">错误</span><strong id="stat-errors" class="text-red">—</strong></div>
-        <div class="stat-card"><span class="stat-label">透明重试</span><strong id="stat-retries">—</strong></div>
-        <div class="stat-card"><span class="stat-label">限流触发</span><strong id="stat-rate-limited" class="text-amber">—</strong></div>
-        <div class="stat-card"><span class="stat-label">熔断触发</span><strong id="stat-breaker-trips" class="text-red">—</strong></div>
+        <div class="stat-card"><span class="stat-label" title="仅统计节点建流或响应首字节前失败后的真实重试；节点健康时为 0 属正常">透明重试</span><strong id="stat-retries">—</strong></div>
+        <div class="stat-card"><span class="stat-label" title="达到全局/凭据并发或带宽限制的次数">限流触发</span><strong id="stat-rate-limited" class="text-amber">—</strong></div>
+        <div class="stat-card"><span class="stat-label" title="节点失败率达到阈值后熔断器打开的次数；节点健康时为 0 属正常">熔断触发</span><strong id="stat-breaker-trips" class="text-red">—</strong></div>
       </div>
 
       <div class="card-grid">

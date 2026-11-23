@@ -57,13 +57,22 @@ func (t *Trend) Record(requests, errors, active int64) {
 	t.maybeEmitLocked(time.Now())
 }
 
-// Snapshot returns the retained samples (oldest first, always a copy).
+// Snapshot returns the retained samples inside the configured window (oldest
+// first, always a copy). The timestamp filter is a second guard on top of the
+// ring capacity so a caller can never receive points older than the advertised
+// 15-minute window.
 func (t *Trend) Snapshot() []Point {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.maybeEmitLocked(time.Now())
-	out := make([]Point, len(t.points))
-	copy(out, t.points)
+	now := time.Now()
+	t.maybeEmitLocked(now)
+	cutoff := now.Add(-t.window).Unix()
+	out := make([]Point, 0, len(t.points))
+	for _, p := range t.points {
+		if p.TS >= cutoff {
+			out = append(out, p)
+		}
+	}
 	return out
 }
 

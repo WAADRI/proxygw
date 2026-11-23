@@ -21,6 +21,22 @@ func TestTrendEmitsAndTrims(t *testing.T) {
 	}
 }
 
+func TestTrendSnapshotDropsPointsOutsideWindow(t *testing.T) {
+	tr := NewTrend(2*time.Second, time.Second)
+	now := time.Now()
+	tr.mu.Lock()
+	tr.last = now
+	tr.points = []Point{
+		{TS: now.Add(-time.Hour).Unix(), Requests: 1, Errors: 1, Active: 1},
+		{TS: now.Unix(), Requests: 2, Errors: 0, Active: 3},
+	}
+	tr.mu.Unlock()
+	pts := tr.Snapshot()
+	if len(pts) != 1 || pts[0].Requests != 2 || pts[0].Active != 3 {
+		t.Fatalf("snapshot = %+v, want only the in-window point", pts)
+	}
+}
+
 func TestTopNWindowAndOrdering(t *testing.T) {
 	top := NewTopN(2*time.Minute, time.Minute, 8)
 	top.Record("a.example.com", 100, false)

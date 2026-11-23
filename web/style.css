@@ -1193,6 +1193,74 @@ textarea {
   stroke: var(--accent);
 }
 
+.spark-crosshair {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.spark-hover-dot {
+  fill: var(--panel);
+  stroke-width: 2;
+  pointer-events: none;
+}
+
+.spark-hover-dot.spark-requests {
+  stroke: var(--accent);
+}
+
+.spark-hover-dot.spark-errors {
+  stroke: var(--red);
+}
+
+.spark-hover-dot.spark-active {
+  stroke: var(--green);
+}
+
+.spark-tooltip {
+  position: absolute;
+  z-index: 8;
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.spark-tip-time {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.spark-tip-rows {
+  display: grid;
+  gap: 4px;
+}
+
+.spark-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.spark-tip-label {
+  margin-right: auto;
+  color: var(--text-dim);
+}
+
+.spark-tip-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 .spark-empty {
   display: flex;
   align-items: center;

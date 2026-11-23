@@ -34,6 +34,7 @@ type panelDeps struct {
 	nodes        *stats.TopN
 	credentials  *stats.TopN
 	activeByCred map[string]int64
+	active       int64
 }
 
 func newPanelDeps() *panelDeps {
@@ -50,7 +51,12 @@ func newPanelDeps() *panelDeps {
 func (d *panelDeps) onRequestStart(credentialID, protocolName, target, nodeID string) {
 	d.mu.Lock()
 	d.activeByCred[credentialID]++
+	d.active++
+	active := d.active
 	d.mu.Unlock()
+	// Update the active gauge immediately; request completion alone would make
+	// the 15s trend sample lag behind real concurrency.
+	d.trend.Record(0, 0, active)
 }
 
 // onRequestEnd implements proxy.Options.OnRequestEnd.
@@ -63,6 +69,10 @@ func (d *panelDeps) onRequestEnd(credentialID, protocolName, target, nodeID stri
 			delete(d.activeByCred, credentialID)
 		}
 	}
+	if d.active > 0 {
+		d.active--
+	}
+	active := d.active
 	d.mu.Unlock()
 	d.counters.AddRequests(ok)
 	total := bytesIn + bytesOut
@@ -73,7 +83,7 @@ func (d *panelDeps) onRequestEnd(credentialID, protocolName, target, nodeID stri
 	if credentialID != "" {
 		d.credentials.Record(credentialID, total, !ok)
 	}
-	d.trend.Record(1, boolToInt64(!ok), 0)
+	d.trend.Record(1, boolToInt64(!ok), active)
 }
 
 // onRetry counts one real transparent retry (proxy pipeline OnRetry callback).

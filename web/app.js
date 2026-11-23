@@ -1733,14 +1733,30 @@
     if (upd) upd.textContent = '更新于 ' + fmtDateTime(Date.now());
   }
 
-  function renderSparkline(trend) {
+  function renderSparkline(rawTrend) {
     var container = $('overview-sparkline');
     var legend = $('overview-sparkline-legend');
     var note = $('overview-trend-note');
     if (!container) return;
     if (legend) legend.replaceChildren();
-    if (!trend.length) {
+    var raw = Array.isArray(rawTrend) ? rawTrend.slice() : [];
+    var points = [];
+    raw.forEach(function (point) {
+      var d = toDate(point && point.ts);
+      if (!d) return;
+      points.push(Object.assign({}, point, { _ms: d.getTime() }));
+    });
+    points.sort(function (a, b) { return a._ms - b._ms; });
+    if (!points.length) {
       container.replaceChildren(el('div', 'spark-empty', '暂无趋势数据（服务端未返回 trend，可能刚启动或趋势缓冲为空）'));
+      if (note) note.textContent = '';
+      return;
+    }
+    var windowMs = 15 * 60 * 1000;
+    var lastMs = points[points.length - 1]._ms;
+    var trend = points.filter(function (point) { return point._ms >= lastMs - windowMs; });
+    if (!trend.length) {
+      container.replaceChildren(el('div', 'spark-empty', '最近 15 分钟暂无趋势数据'));
       if (note) note.textContent = '';
       return;
     }
@@ -1750,8 +1766,8 @@
       { key: 'active', label: '活跃连接', cls: 'active', color: 'swatch-active' }
     ];
     var width = 640;
-    var height = 180;
-    var pad = { l: 6, r: 6, t: 12, b: 14 };
+    var height = 190;
+    var pad = { l: 8, r: 8, t: 12, b: 26 };
     var last = trend[trend.length - 1] || {};
 
     if (legend) {
@@ -1770,21 +1786,38 @@
     svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
     svg.setAttribute('preserveAspectRatio', 'none');
     svg.setAttribute('role', 'img');
-    svg.setAttribute('aria-label', '最近 15 分钟请求、错误、活跃连接趋势');
+    svg.setAttribute('aria-label', '最近 15 分钟请求、错误、活跃连接趋势，悬停查看数据');
 
     for (var g = 0; g <= 3; g++) {
-      var y = pad.t + ((height - pad.t - pad.b) * g) / 3;
-      var line = document.createElementNS(ns, 'line');
-      line.setAttribute('x1', String(pad.l));
-      line.setAttribute('y1', String(y));
-      line.setAttribute('x2', String(width - pad.r));
-      line.setAttribute('y2', String(y));
-      line.setAttribute('class', 'spark-grid');
-      svg.append(line);
+      var gy = pad.t + ((height - pad.t - pad.b) * g) / 3;
+      var grid = document.createElementNS(ns, 'line');
+      grid.setAttribute('x1', String(pad.l));
+      grid.setAttribute('y1', String(gy));
+      grid.setAttribute('x2', String(width - pad.r));
+      grid.setAttribute('y2', String(gy));
+      grid.setAttribute('class', 'spark-grid');
+      svg.append(grid);
+    }
+
+    var firstLabel = document.createElementNS(ns, 'text');
+    firstLabel.setAttribute('x', String(pad.l));
+    firstLabel.setAttribute('y', String(height - 7));
+    firstLabel.setAttribute('class', 'spark-axis');
+    firstLabel.textContent = fmtTimeHM(trend[0].ts);
+    svg.append(firstLabel);
+    if (trend.length > 1) {
+      var lastLabel = document.createElementNS(ns, 'text');
+      lastLabel.setAttribute('x', String(width - pad.r));
+      lastLabel.setAttribute('y', String(height - 7));
+      lastLabel.setAttribute('text-anchor', 'end');
+      lastLabel.setAttribute('class', 'spark-axis');
+      lastLabel.textContent = fmtTimeHM(last.ts);
+      svg.append(lastLabel);
     }
 
     var innerW = width - pad.l - pad.r;
     var innerH = height - pad.t - pad.b;
+    var seriesData = [];
     series.forEach(function (s) {
       var values = trend.map(function (point) {
         var v = Number(point && point[s.key]);
@@ -1792,30 +1825,112 @@
       });
       var max = Math.max.apply(null, values);
       if (!(max > 0)) max = 1;
-      var points = values.map(function (v, index) {
+      var yFor = function (v) {
+        return pad.t + innerH - (Math.max(0, v) / max) * innerH;
+      };
+      var pointsAttr = values.map(function (v, index) {
         var x = pad.l + (trend.length === 1 ? innerW / 2 : (innerW * index) / (trend.length - 1));
-        var py = pad.t + innerH - (Math.max(0, v) / max) * innerH;
-        return x.toFixed(2) + ',' + py.toFixed(2);
+        return x.toFixed(2) + ',' + yFor(v).toFixed(2);
       });
       var polyline = document.createElementNS(ns, 'polyline');
-      polyline.setAttribute('points', points.join(' '));
+      polyline.setAttribute('points', pointsAttr.join(' '));
       polyline.setAttribute('class', 'spark-line spark-' + s.cls);
       svg.append(polyline);
-      var lastX = points[points.length - 1].split(',')[0];
-      var lastY = points[points.length - 1].split(',')[1];
+      var lastPoint = pointsAttr[pointsAttr.length - 1].split(',');
       var dot = document.createElementNS(ns, 'circle');
-      dot.setAttribute('cx', lastX);
-      dot.setAttribute('cy', lastY);
+      dot.setAttribute('cx', lastPoint[0]);
+      dot.setAttribute('cy', lastPoint[1]);
       dot.setAttribute('r', '3');
       dot.setAttribute('class', 'spark-dot spark-' + s.cls);
       svg.append(dot);
+      seriesData.push({ s: s, values: values, max: max, yFor: yFor });
     });
+
+    var crosshair = document.createElementNS(ns, 'line');
+    crosshair.setAttribute('x1', '0');
+    crosshair.setAttribute('x2', '0');
+    crosshair.setAttribute('y1', String(pad.t));
+    crosshair.setAttribute('y2', String(height - pad.b));
+    crosshair.setAttribute('class', 'spark-crosshair');
+    crosshair.style.visibility = 'hidden';
+    svg.append(crosshair);
+    var hoverDots = seriesData.map(function (data) {
+      var dot = document.createElementNS(ns, 'circle');
+      dot.setAttribute('r', '4');
+      dot.setAttribute('class', 'spark-hover-dot spark-' + data.s.cls);
+      dot.style.visibility = 'hidden';
+      svg.append(dot);
+      return dot;
+    });
+
     container.replaceChildren(svg);
+    var tip = el('div', 'spark-tooltip');
+    tip.style.display = 'none';
+    container.append(tip);
+
+    function hideTip() {
+      tip.style.display = 'none';
+      crosshair.style.visibility = 'hidden';
+      hoverDots.forEach(function (dot) { dot.style.visibility = 'hidden'; });
+    }
+
+    function showTip(evt) {
+      var rect = svg.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      var x = ((evt.clientX - rect.left) / rect.width) * width;
+      var ratio = trend.length === 1 ? 0 : (x - pad.l) / innerW;
+      var index = Math.max(0, Math.min(trend.length - 1, Math.round(ratio * (trend.length - 1))));
+      var point = trend[index];
+      var crossX = pad.l + (trend.length === 1 ? innerW / 2 : (innerW * index) / (trend.length - 1));
+      crosshair.setAttribute('x1', String(crossX));
+      crosshair.setAttribute('x2', String(crossX));
+      crosshair.style.visibility = 'visible';
+
+      seriesData.forEach(function (data, i) {
+        var value = data.values[index];
+        hoverDots[i].setAttribute('cx', String(crossX));
+        hoverDots[i].setAttribute('cy', String(data.yFor(value)));
+        hoverDots[i].style.visibility = 'visible';
+      });
+
+      var time = el('div', 'spark-tip-time', fmtDateTime(point.ts));
+      var rows = el('div', 'spark-tip-rows');
+      series.forEach(function (s) {
+        var row = el('div', 'spark-tip-row');
+        row.append(el('span', 'legend-swatch ' + s.color));
+        row.append(el('span', 'spark-tip-label', s.label));
+        row.append(el('span', 'spark-tip-value', fmtNum(point[s.key])));
+        rows.append(row);
+      });
+      tip.replaceChildren(time, rows);
+      tip.style.display = 'block';
+
+      var box = container.getBoundingClientRect();
+      var left = evt.clientX - box.left + 12;
+      var top = evt.clientY - box.top + 12;
+      if (left + tip.offsetWidth > container.clientWidth - 6) {
+        left = evt.clientX - box.left - tip.offsetWidth - 12;
+      }
+      if (top + tip.offsetHeight > container.clientHeight - 6) {
+        top = container.clientHeight - tip.offsetHeight - 6;
+      }
+      tip.style.left = Math.max(4, left) + 'px';
+      tip.style.top = Math.max(4, top) + 'px';
+    }
+
+    svg.addEventListener('mousemove', showTip);
+    svg.addEventListener('mouseleave', hideTip);
+    svg.addEventListener('touchstart', function (evt) {
+      if (evt.touches && evt.touches.length) {
+        var touch = evt.touches[0];
+        showTip({ clientX: touch.clientX, clientY: touch.clientY });
+      }
+    }, { passive: true });
+
     if (note) {
-      var first = trend[0] || {};
       note.textContent = '窗口：15 分钟 · 数据点 ' + trend.length + ' 个 · 从 ' +
-        fmtTimeHM(first.ts) + ' 到 ' + fmtTimeHM(last.ts) +
-        '（三条曲线各自独立归一化，仅展示趋势形态）';
+        fmtTimeHM(trend[0].ts) + ' 到 ' + fmtTimeHM(last.ts) +
+        '（三条曲线各自独立归一化；悬停查看具体数值）';
     }
   }
 
@@ -1952,7 +2067,7 @@
       var variant = /ready|online|active|connected/i.test(state) ? 'ok' : (/drain|degrad|close|error|fail/i.test(state) ? 'warn' : 'muted');
       tdState.append(badge(state || '—', variant));
       tr.append(tdState);
-      tr.append(el('td', 'col-num', item.planes === undefined ? '—' : String(item.planes)));
+      tr.append(el('td', null, item.planes === undefined ? '—' : String(item.planes)));
       tr.append(el('td', null, fmtRelative(item.connected_since)));
       tr.append(el('td', 'cell-sub', item.last_error || '—'));
       tbody.append(tr);
