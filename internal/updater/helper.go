@@ -31,6 +31,7 @@ func RunApplyHelper(opts HelperOptions) int {
 	if strings.TrimSpace(opts.Target) == "" || strings.TrimSpace(opts.NewBinary) == "" {
 		return 1
 	}
+	defer os.Remove(opts.NewBinary)
 	if err := writeHelperStatus(opts.StatusPath, protocol.UpdateStatus{
 		State:         protocol.UpdateReplacing,
 		TargetVersion: opts.Version,
