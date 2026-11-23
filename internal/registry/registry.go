@@ -63,6 +63,11 @@ type nodeState struct {
 	node   model.Node
 	planes map[int]planeState
 	epoch  uint32
+	// updateClearedAt suppresses stale STATS/UPDATE_STATUS frames whose
+	// updated_at is not newer than the last manual clear. Nodes keep their
+	// last status file across reconnects, so a plain "delete" would otherwise
+	// come back on the next STATS frame.
+	updateClearedAt int64
 }
 
 // Registry aggregates node runtime state.
@@ -330,7 +335,9 @@ func (r *Registry) UpdateStats(nodeID string, st protocol.Stats) {
 		n.Runtime = clampString(st.Runtime, 16)
 	}
 	if st.Update != nil {
-		r.applyNodeUpdateLocked(n, st.Update)
+		if !ns.updateSuppressed(st.Update) {
+			r.applyNodeUpdateLocked(n, st.Update)
+		}
 	}
 	egressChanged := false
 	if st.EgressV4 != "" && st.EgressV4 != n.EgressIP.V4 {
@@ -367,8 +374,20 @@ func (r *Registry) UpdateNodeUpdate(nodeID string, st protocol.UpdateStatus) {
 	if ns == nil {
 		return
 	}
+	if ns.updateSuppressed(&st) {
+		return
+	}
 	r.applyNodeUpdateLocked(&ns.node, &st)
 	ns.node.UpdatedAt = time.Now()
+}
+
+// updateSuppressed reports whether an update status is older than the last
+// manual clear. Newer statuses (a real new update) are still accepted.
+func (ns *nodeState) updateSuppressed(st *protocol.UpdateStatus) bool {
+	if ns == nil || ns.updateClearedAt <= 0 || st == nil {
+		return false
+	}
+	return st.UpdatedAt == 0 || st.UpdatedAt <= ns.updateClearedAt
 }
 
 func (r *Registry) applyNodeUpdateLocked(n *model.Node, st *protocol.UpdateStatus) {
@@ -418,6 +437,7 @@ func (r *Registry) ClearNodeUpdate(nodeID string) bool {
 	}
 	ns.node.Update = nil
 	ns.node.UpdatedAt = time.Now()
+	ns.updateClearedAt = time.Now().UnixMilli()
 	return true
 }
 

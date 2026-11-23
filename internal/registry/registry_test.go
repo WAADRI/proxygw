@@ -3,6 +3,7 @@ package registry
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
 	"proxygw/internal/metrics"
 	"proxygw/internal/model"
@@ -185,6 +186,39 @@ func TestUpdateStats(t *testing.T) {
 	}
 	// Unknown nodes are ignored.
 	r.UpdateStats("ghost", protocol.Stats{Inflight: 1})
+}
+
+func TestClearNodeUpdateSuppressesStaleReports(t *testing.T) {
+	r, _ := New(nil, nil, "")
+	defer r.Close()
+	if _, _, err := r.AttachPlane(meta("node-clear", 0, "1.2.3.4")); err != nil {
+		t.Fatal(err)
+	}
+	stale := protocol.UpdateStatus{
+		State:          protocol.UpdateReplacing,
+		CurrentVersion: "1.0.11",
+		TargetVersion:  "1.0.12",
+		Progress:       100,
+		UpdatedAt:      time.Now().Add(-time.Hour).UnixMilli(),
+	}
+	r.UpdateNodeUpdate("node-clear", stale)
+	if !r.ClearNodeUpdate("node-clear") {
+		t.Fatal("ClearNodeUpdate returned false")
+	}
+	if n, _ := r.Get("node-clear"); n.Update != nil {
+		t.Fatalf("update not cleared: %+v", n.Update)
+	}
+	// The node reconnects and re-sends its old status file; it must stay hidden.
+	r.UpdateStats("node-clear", protocol.Stats{Update: &stale})
+	if n, _ := r.Get("node-clear"); n.Update != nil {
+		t.Fatalf("stale update came back: %+v", n.Update)
+	}
+	// A genuinely newer update status is accepted.
+	fresh := protocol.UpdateStatus{State: protocol.UpdateSuccess, UpdatedAt: time.Now().Add(time.Minute).UnixMilli()}
+	r.UpdateStats("node-clear", protocol.Stats{Update: &fresh})
+	if n, _ := r.Get("node-clear"); n.Update == nil || n.Update.State != protocol.UpdateSuccess {
+		t.Fatalf("fresh update not applied: %+v", n.Update)
+	}
 }
 
 func TestUpdateNodeUpdateStatus(t *testing.T) {
