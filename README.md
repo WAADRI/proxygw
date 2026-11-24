@@ -338,6 +338,7 @@ proxy:
 ## 节点元数据
 
 - 出口 IP 优先级：节点手工 `egress.manual_v4/v6` > 服务端看到的隧道对端地址 > 节点请求 https IP 回声端点（IPv4/IPv6 分别探测，2s 超时，失败降级）。IP 回声端点只做固定规则提取（纯文本第一个合法 IP / JSON `ip` 字段 / cloudflare trace `ip=` 行），无需配置映射。
+- IPv4/IPv6 会分别记录并同时展示；归属地解析优先使用 IPv4，IPv4 不存在时回退到 IPv6，因此 IPv6-only 节点也能显示国家/城市/ASN。两族都存在时，表格主显示 IPv4、下面显示 IPv6；只有 IPv6 时直接以 IPv6 作为主显示。
 - 「IP 回声」与「归属地查询」是两个独立配置项；归属地查询采用三层 provider，**禁止自动嗅探响应格式**：
   - `preset`：内置适配器 `ipinfo` / `ip-api` / `ipwho.is` / `cloudflare` / 本地 MMDB；`ipinfo` 默认使用新版 `https://api.ipinfo.io/lite/{ip}`（需要 token，返回 `country_code`/`asn`/`as_name`），也兼容旧版 `https://ipinfo.io/{ip}/json` 和 Core `/lookup` 的嵌套响应；
   - 本地 MMDB 同时兼容 **MaxMind GeoLite2/GeoIP2 嵌套结构**、**IPinfo Lite / IPLocate 等扁平结构**（如 `country` 为国家全名、`country_code` 为 ISO 代码、`asn` 为 `AS15169`）以及 **Merged-IP 的嵌套 `asn` 对象**；单个字段类型不符不会再让整条 lookup 失败；

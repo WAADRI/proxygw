@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,15 +40,28 @@ func (s *Server) enrich(ctx context.Context) {
 		return
 	}
 	for _, n := range s.registry.List() {
-		if !n.Online || n.EgressIP.V4 == "" {
+		if !n.Online {
+			continue
+		}
+		ip := nodeGeoIP(n)
+		if ip == "" {
 			continue
 		}
 		// Skip when the resolved geo is already newer than the egress sample.
 		if !n.Geo.IsZero() && !n.Geo.UpdatedAt.Before(n.EgressIP.UpdatedAt) {
 			continue
 		}
-		mc.start(ctx, s, n.ID, n.EgressIP.V4)
+		mc.start(ctx, s, n.ID, ip)
 	}
+}
+
+// nodeGeoIP picks the address used for geolocation. IPv4 is preferred when the
+// node has both families; IPv6-only nodes still get country/city/ASN metadata.
+func nodeGeoIP(n model.Node) string {
+	if v4 := strings.TrimSpace(n.EgressIP.V4); v4 != "" {
+		return v4
+	}
+	return strings.TrimSpace(n.EgressIP.V6)
 }
 
 func (mc *metadataCoordinator) start(ctx context.Context, s *Server, nodeID, ip string) {

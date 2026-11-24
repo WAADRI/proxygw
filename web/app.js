@@ -2484,9 +2484,18 @@
   function nodeEgressCell(node) {
     var td = nodeCell('egress', 'cell-nowrap');
     var egress = node.egress_ip || {};
-    var v4 = el('span', 'cell-code', egress.v4 || '—');
-    td.append(v4);
-    if (egress.v6) td.append(el('span', 'cell-sub', 'v6: ' + egress.v6));
+    var v4 = String(egress.v4 || '').trim();
+    var v6 = String(egress.v6 || '').trim();
+    if (v4) {
+      td.append(el('span', 'cell-code', v4));
+      if (v6) td.append(el('span', 'cell-sub', 'v6: ' + v6));
+    } else if (v6) {
+      // IPv6-only nodes should show the IPv6 address as the primary value
+      // instead of a misleading dash.
+      td.append(el('span', 'cell-code', v6));
+    } else {
+      td.append(el('span', 'cell-code', '—'));
+    }
     if (egress.source) {
       var sourceLabels = { manual: '手工', peer: '对端', echo: '回声' };
       td.append(el('span', 'cell-sub', '来源：' + (sourceLabels[egress.source] || egress.source)));
