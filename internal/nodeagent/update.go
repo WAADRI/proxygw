@@ -180,7 +180,15 @@ func (a *Agent) runUpdate(cmd protocol.UpdateCommand) {
 	defer cancel()
 
 	u := updater.FromEnv("client", a.log, a.version)
-	staged, err := u.Stage(ctx)
+	staged, err := u.StageWithProgress(ctx, func(p updater.StageProgress) {
+		a.setUpdateStatus(protocol.UpdateStatus{
+			State:          p.State,
+			CurrentVersion: a.version,
+			TargetVersion:  p.Version,
+			Progress:       p.Progress,
+			Message:        p.Message,
+		})
+	})
 	if err != nil {
 		a.failUpdate(fmt.Errorf("下载或校验更新包失败: %w", err))
 		return

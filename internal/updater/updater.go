@@ -451,16 +451,35 @@ type Staged struct {
 	Updated    bool
 }
 
+// StageProgress is one coarse progress report emitted while staging an update.
+// State uses the same strings as protocol.UpdateStatus ("downloading"/"verified").
+type StageProgress struct {
+	State    string
+	Version  string
+	Message  string
+	Progress int
+}
+
 // Stage downloads and verifies the latest release but does not touch the running
 // binary. It is used by the node update helper flow, where a separate process
 // performs the final atomic replacement after the old process exits.
 func (u *Updater) Stage(ctx context.Context) (Staged, error) {
+	return u.StageWithProgress(ctx, nil)
+}
+
+// StageWithProgress is Stage with coarse state callbacks. Downloading and
+// verified are reported so the panel does not jump from checking straight to
+// replacing during a slow download.
+func (u *Updater) StageWithProgress(ctx context.Context, report func(StageProgress)) (Staged, error) {
 	release, newer, err := u.Check(ctx)
 	if err != nil {
 		return Staged{}, err
 	}
 	if !newer {
 		return Staged{Version: release.Version}, nil
+	}
+	if report != nil {
+		report(StageProgress{State: "downloading", Version: release.Version, Message: "正在下载更新包", Progress: 10})
 	}
 	assetName := u.assetName(release.Version)
 	directAsset := fmt.Sprintf("%s/%s/releases/download/%s/%s", u.ghBase, u.repo, release.Tag, assetName)
@@ -479,6 +498,9 @@ func (u *Updater) Stage(ctx context.Context) (Staged, error) {
 			u.logger.Warn("更新包下载或校验失败，尝试下一个源", "event", "update.source_failed",
 				"url", redactURL(assetURL), "error", err)
 			continue
+		}
+		if report != nil {
+			report(StageProgress{State: "verified", Version: release.Version, Message: "更新包已校验，准备替换", Progress: 100})
 		}
 		return staged, nil
 	}

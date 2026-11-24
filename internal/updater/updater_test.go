@@ -172,6 +172,65 @@ func TestUpdateDownloadsVerifiesAndInstalls(t *testing.T) {
 	}
 }
 
+func TestStageProgressReportsDownloadingAndVerified(t *testing.T) {
+	const version = "1.2.3"
+	newBinary := []byte("#!/bin/sh\necho updated\n")
+	archive := makeTarGz(t, "node-proxy_"+version+"_linux_amd64/proxygw-client", newBinary)
+	sum := sha256.Sum256(archive)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/releases/latest":
+			_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v" + version})
+		case "/owner/repo/releases/download/v" + version + "/node-proxy_" + version + "_linux_amd64.tar.gz.sha256":
+			_, _ = io.WriteString(w, hex.EncodeToString(sum[:])+"  node-proxy_"+version+"_linux_amd64.tar.gz\n")
+		case "/owner/repo/releases/download/v" + version + "/node-proxy_" + version + "_linux_amd64.tar.gz":
+			_, _ = w.Write(archive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	u := New(Options{
+		Repository:     "owner/repo",
+		CurrentVersion: "1.0.0",
+		Role:           "client",
+		APIBase:        srv.URL,
+		GitHubBase:     srv.URL,
+		GOOS:           "linux",
+		GOARCH:         "amd64",
+		Logger:         discardLogger(),
+		Client:         srv.Client(),
+	})
+	var states []string
+	staged, err := u.StageWithProgress(context.Background(), func(p StageProgress) {
+		states = append(states, p.State)
+		if p.Version != version {
+			t.Errorf("progress version = %q", p.Version)
+		}
+	})
+	if err != nil {
+		t.Fatalf("StageWithProgress: %v", err)
+	}
+	defer os.Remove(staged.BinaryPath)
+	if len(states) != 2 || states[0] != "downloading" || states[1] != "verified" {
+		t.Fatalf("progress states = %v", states)
+	}
+	if !bytes.Equal(mustReadFile(t, staged.BinaryPath), newBinary) {
+		t.Fatal("staged binary content mismatch")
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func makeTarGz(t *testing.T, name string, data []byte) []byte {
 	t.Helper()
 	var buf bytes.Buffer
