@@ -3,6 +3,9 @@
 FROM golang:1.24-alpine AS build
 WORKDIR /src
 
+# Buildx automatic platform args: GOARM must be set explicitly for linux/arm/v7.
+ARG TARGETVARIANT
+
 # 国内构建可覆盖：--build-arg GOPROXY=https://goproxy.cn,direct
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY} CGO_ENABLED=0 GOOS=linux
@@ -14,7 +17,7 @@ COPY . .
 ARG VERSION=dev
 ARG COMMIT=none
 ARG BUILD_TIME=unknown
-RUN go build -trimpath -ldflags "-s -w \
+RUN GOARM=${TARGETVARIANT#v} go build -trimpath -ldflags "-s -w \
     -X proxygw/internal/version.Version=${VERSION} \
     -X proxygw/internal/version.Commit=${COMMIT} \
     -X proxygw/internal/version.BuildTime=${BUILD_TIME}" \

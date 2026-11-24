@@ -76,6 +76,8 @@ cp config.client.example.yaml config.client.yaml
 
 也可以用一键接入脚本：`scripts/install-node.sh`（Linux）或 `scripts/install-node.ps1`（Windows）。
 
+Release 二进制包含 `linux_amd64`、`linux_arm64`、`linux_arm`（ARMv7/armhf）、`darwin_amd64/arm64`、`windows_amd64`。ARMv7 设备直接下载 `linux_arm` 包；ARMv6 设备需要自行用 `GOOS=linux GOARCH=arm GOARM=6 go build` 构建。
+
 ### 4. 使用代理
 
 ```bash
@@ -359,7 +361,7 @@ proxy:
 
 ### Docker（推荐直接使用预构建镜像）
 
-GitHub Actions 的 `Build` 工作流会为 main 构建 `linux/amd64` + `linux/arm64` 多架构镜像并推送到 GHCR：
+GitHub Actions 的 `Build` 工作流会为 main 构建 `linux/amd64` + `linux/arm64` + `linux/arm/v7` 多架构镜像并推送到 GHCR：
 
 - `ghcr.io/waadri/proxygw-server`：面板 + wss/QUIC 隧道 + HTTP/SOCKS5 代理入口
 - `ghcr.io/waadri/proxygw-client`：节点客户端

@@ -51,6 +51,10 @@ func TestAssetName(t *testing.T) {
 	if got := u.assetName("v1.2.3"); got != "node-proxy_1.2.3_windows_arm64.zip" {
 		t.Fatalf("asset name = %q", got)
 	}
+	u = New(Options{Role: "client", GOOS: "linux", GOARCH: "arm", Logger: discardLogger()})
+	if got := u.assetName("v1.2.3"); got != "node-proxy_1.2.3_linux_arm.tar.gz" {
+		t.Fatalf("arm asset name = %q", got)
+	}
 }
 
 func TestCheckViaGitHubAPI(t *testing.T) {

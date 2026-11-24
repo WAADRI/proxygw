@@ -8,7 +8,7 @@
 
 ### 1.1 直接使用 GHCR 预构建镜像（推荐）
 
-GitHub Actions 会为每次 main 构建多架构镜像（linux/amd64 + linux/arm64）：
+GitHub Actions 会为每次 main 构建多架构镜像（linux/amd64 + linux/arm64 + linux/arm/v7）：
 
 - `ghcr.io/waadri/proxygw-client`
 - `ghcr.io/waadri/proxygw-server`
