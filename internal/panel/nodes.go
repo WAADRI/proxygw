@@ -368,6 +368,9 @@ func (s *Server) handleNodeKick(w http.ResponseWriter, r *http.Request) {
 	}
 	kickErr := ""
 	if s.opts.Tunnel != nil {
+		if resetter, ok := s.opts.Tunnel.(interface{ ResetNodeTakeover(string) }); ok {
+			resetter.ResetNodeTakeover(nodeID)
+		}
 		if err := s.opts.Tunnel.KickNode(nodeID, reason, "panel forced offline"); err != nil {
 			// "no active sessions" is not a failure for a force-offline action:
 			// the node is already down, but we still mark it offline below.

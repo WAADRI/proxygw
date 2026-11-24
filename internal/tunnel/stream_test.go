@@ -353,6 +353,26 @@ func TestKickNode(t *testing.T) {
 	}
 }
 
+func TestResetNodeTakeover(t *testing.T) {
+	env := newTestEnv(t, testEnvOptions{})
+	now := time.Now()
+	env.srv.mu.Lock()
+	env.srv.cooldown["node-reset"] = now.Add(10 * time.Minute)
+	env.srv.takeovers["node-reset"] = []time.Time{now}
+	env.srv.mu.Unlock()
+
+	env.srv.ResetNodeTakeover("node-reset")
+
+	env.srv.mu.Lock()
+	defer env.srv.mu.Unlock()
+	if _, ok := env.srv.cooldown["node-reset"]; ok {
+		t.Fatal("cooldown was not cleared")
+	}
+	if _, ok := env.srv.takeovers["node-reset"]; ok {
+		t.Fatal("takeover history was not cleared")
+	}
+}
+
 func TestDrainNode(t *testing.T) {
 	env := newTestEnv(t, testEnvOptions{times: &Timeouts{Drain: 2 * time.Second}})
 	conn, tap, _ := env.registerNode("node-drain", 0)

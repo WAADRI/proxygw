@@ -204,6 +204,10 @@ func (a *tunnelAPIAdapter) KickNode(nodeID, reason, message string) error {
 	return nil
 }
 
+func (a *tunnelAPIAdapter) ResetNodeTakeover(nodeID string) {
+	a.srv.tunnel.ResetNodeTakeover(nodeID)
+}
+
 func (a *tunnelAPIAdapter) ProbeNode(ctx context.Context, nodeID, kind, target string, payload []byte) (*protocol.ProbeResult, error) {
 	return a.srv.tunnel.ProbeNode(ctx, nodeID, kind, target, payload)
 }

@@ -36,6 +36,22 @@ func (s *Server) KickNode(nodeID, reason, message string) error {
 	return nil
 }
 
+// ResetNodeTakeover clears the takeover history and cooldown of one node. It is
+// used by the panel force-offline action: an operator explicitly asked the node
+// to disconnect, so its immediate reconnect must not be rejected by a cooldown
+// accumulated before the kick.
+func (s *Server) ResetNodeTakeover(nodeID string) {
+	nodeID = strings.TrimSpace(nodeID)
+	if nodeID == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.cooldown, nodeID)
+	delete(s.takeovers, nodeID)
+	s.mu.Unlock()
+	s.logger.Info("node takeover state reset", "event", "node_takeover_reset", "node_id", nodeID)
+}
+
 // UpdateNode sends a self-update command to one live plane of nodeID. The node
 // downloads the release itself and reports progress over UPDATE_STATUS/STATS.
 func (s *Server) UpdateNode(nodeID string, cmd protocol.UpdateCommand) error {
