@@ -4,6 +4,7 @@
 package audit
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/hex"
@@ -215,10 +216,10 @@ func (s *Store) queryRingUnbounded(f Filter) []model.AuditEvent {
 	return out
 }
 
-// queryFileTail grows a read window backwards from EOF until it has Limit
-// matches or reaches the beginning of the file. This keeps the common panel
-// request (newest page, optionally filtered) proportional to the events read
-// rather than the whole historical file.
+// queryFileTail reads only the last window first. If that is not enough to fill
+// the requested page it performs one full scan (bounded to Limit events); this
+// keeps the common newest-page query fast without making rare filters slower
+// than the old full-scan implementation.
 func (s *Store) queryFileTail(f Filter) ([]model.AuditEvent, error) {
 	fh, err := os.Open(s.path)
 	if err != nil {
@@ -227,55 +228,98 @@ func (s *Store) queryFileTail(f Filter) ([]model.AuditEvent, error) {
 		}
 		return nil, fmt.Errorf("audit: open: %w", err)
 	}
-	defer fh.Close()
 	info, err := fh.Stat()
 	if err != nil {
+		fh.Close()
 		return nil, fmt.Errorf("audit: stat: %w", err)
 	}
 	size := info.Size()
 	if size == 0 {
+		fh.Close()
 		return nil, nil
 	}
-	const initialWindow = int64(256 * 1024)
-	window := initialWindow
-	for {
-		start := size - window
-		if start < 0 {
-			start = 0
+	const tailWindow = int64(256 * 1024)
+	start := size - tailWindow
+	if start < 0 {
+		start = 0
+	}
+	data := make([]byte, size-start)
+	if _, err := fh.ReadAt(data, start); err != nil {
+		fh.Close()
+		return nil, fmt.Errorf("audit: read tail: %w", err)
+	}
+	fh.Close()
+	lines := bytes.Split(data, []byte("\n"))
+	first := 0
+	if start > 0 {
+		// The first chunk boundary can cut a line; ignore that oldest fragment.
+		first = 1
+	}
+	out := make([]model.AuditEvent, 0, f.Limit)
+	for i := len(lines) - 1; i >= first && len(out) < f.Limit; i-- {
+		line := bytes.TrimSpace(lines[i])
+		if len(line) == 0 {
+			continue
 		}
-		data := make([]byte, size-start)
-		if _, err := fh.ReadAt(data, start); err != nil {
-			return nil, fmt.Errorf("audit: read tail: %w", err)
+		var ev model.AuditEvent
+		if err := json.Unmarshal(line, &ev); err != nil {
+			continue // skip corrupt line, keep the rest readable
 		}
-		lines := bytes.Split(data, []byte("\n"))
-		first := 0
-		if start > 0 {
-			// The first chunk boundary can cut a line; ignore that oldest
-			// fragment. If it mattered, the window is extended below.
-			first = 1
-		}
-		out := make([]model.AuditEvent, 0, f.Limit)
-		for i := len(lines) - 1; i >= first && len(out) < f.Limit; i-- {
-			line := bytes.TrimSpace(lines[i])
-			if len(line) == 0 {
-				continue
-			}
-			var ev model.AuditEvent
-			if err := json.Unmarshal(line, &ev); err != nil {
-				continue // skip corrupt line, keep the rest readable
-			}
-			if match(ev, f) {
-				out = append(out, ev)
-			}
-		}
-		if len(out) >= f.Limit || start == 0 {
-			return out, nil
-		}
-		window *= 2
-		if window > size {
-			window = size
+		if match(ev, f) {
+			out = append(out, ev)
 		}
 	}
+	if len(out) >= f.Limit {
+		return out, nil
+	}
+	return s.queryFileFull(f)
+}
+
+// queryFileFull scans the JSONL once and keeps only the newest Limit matches.
+func (s *Store) queryFileFull(f Filter) ([]model.AuditEvent, error) {
+	fh, err := os.Open(s.path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("audit: open: %w", err)
+	}
+	defer fh.Close()
+	sc := bufio.NewScanner(fh)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	ring := make([]model.AuditEvent, 0, f.Limit)
+	pos := 0
+	for sc.Scan() {
+		var ev model.AuditEvent
+		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
+			continue
+		}
+		if !match(ev, f) {
+			continue
+		}
+		if len(ring) < f.Limit {
+			ring = append(ring, ev)
+		} else {
+			ring[pos] = ev
+			pos = (pos + 1) % f.Limit
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("audit: scan: %w", err)
+	}
+	if len(ring) < f.Limit {
+		for i, j := 0, len(ring)-1; i < j; i, j = i+1, j-1 {
+			ring[i], ring[j] = ring[j], ring[i]
+		}
+		return ring, nil
+	}
+	// The circular buffer starts at pos (oldest) and its predecessor is newest.
+	out := make([]model.AuditEvent, 0, len(ring))
+	for i := 0; i < len(ring); i++ {
+		idx := (pos - 1 - i + len(ring)) % len(ring)
+		out = append(out, ring[idx])
+	}
+	return out, nil
 }
 
 func match(ev model.AuditEvent, f Filter) bool {
