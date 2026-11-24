@@ -41,7 +41,8 @@
 //	  "nodes": [
 //	    {"id","alias","online","enabled","weight","transport","planes",
 //	     "inflight","latency_ewma_ms","bytes_in","bytes_out","breaker_state",
-//	     "egress_ip","geo","groups","last_heartbeat"}
+//	     "egress_ip","geo","version","runtime","update_capable","update",
+//	     "groups","last_heartbeat"}
 //	  ]
 //	}
 //

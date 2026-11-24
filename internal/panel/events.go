@@ -59,23 +59,29 @@ func (h *sseHub) subscriberCount() int {
 }
 
 // eventNode is the per-node summary embedded in the SSE snapshot/tick payload.
+// Update-related fields are part of the live node list so the panel can refresh
+// checking/downloading/replacing states without a separate GET /nodes request.
 type eventNode struct {
-	ID            string         `json:"id"`
-	Alias         string         `json:"alias,omitempty"`
-	Online        bool           `json:"online"`
-	Enabled       bool           `json:"enabled"`
-	Weight        int            `json:"weight"`
-	Transport     string         `json:"transport,omitempty"`
-	Planes        int            `json:"planes"`
-	Inflight      int64          `json:"inflight"`
-	LatencyEWMA   float64        `json:"latency_ewma_ms"`
-	BytesIn       uint64         `json:"bytes_in"`
-	BytesOut      uint64         `json:"bytes_out"`
-	BreakerState  string         `json:"breaker_state,omitempty"`
-	EgressIP      model.EgressIP `json:"egress_ip"`
-	Geo           model.Geo      `json:"geo"`
-	Groups        []string       `json:"groups,omitempty"`
-	LastHeartbeat time.Time      `json:"last_heartbeat,omitempty"`
+	ID            string            `json:"id"`
+	Alias         string            `json:"alias,omitempty"`
+	Online        bool              `json:"online"`
+	Enabled       bool              `json:"enabled"`
+	Weight        int               `json:"weight"`
+	Transport     string            `json:"transport,omitempty"`
+	Planes        int               `json:"planes"`
+	Inflight      int64             `json:"inflight"`
+	LatencyEWMA   float64           `json:"latency_ewma_ms"`
+	BytesIn       uint64            `json:"bytes_in"`
+	BytesOut      uint64            `json:"bytes_out"`
+	BreakerState  string            `json:"breaker_state,omitempty"`
+	EgressIP      model.EgressIP    `json:"egress_ip"`
+	Geo           model.Geo         `json:"geo"`
+	Version       string            `json:"version"`
+	Runtime       string            `json:"runtime"`
+	UpdateCapable bool              `json:"update_capable"`
+	Update        *model.NodeUpdate `json:"update"`
+	Groups        []string          `json:"groups,omitempty"`
+	LastHeartbeat time.Time         `json:"last_heartbeat,omitempty"`
 }
 
 // eventPayload is the JSON object carried by every `data:` line.
@@ -185,6 +191,10 @@ func (s *Server) buildEventPayload(r *http.Request, kind string) eventPayload {
 			BreakerState:  node.BreakerState,
 			EgressIP:      node.EgressIP,
 			Geo:           node.Geo,
+			Version:       node.Version,
+			Runtime:       node.Runtime,
+			UpdateCapable: node.UpdateCapable,
+			Update:        node.Update,
 			Groups:        node.Groups,
 			LastHeartbeat: node.LastHeartbeat,
 		})

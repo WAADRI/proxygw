@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"proxygw/internal/protocol"
 )
 
 // readSSEData reads lines until one carries a `data:` payload.
@@ -34,6 +36,14 @@ func readSSEData(t *testing.T, lines <-chan string, timeout time.Duration) []byt
 func TestEventsSSE(t *testing.T) {
 	env := newTestEnv(t)
 	seedNodes(t, env)
+	env.reg.UpdateNodeUpdate("node-a", protocol.UpdateStatus{
+		State:          protocol.UpdateDownloading,
+		CurrentVersion: "1.2.3",
+		TargetVersion:  "1.2.4",
+		Progress:       42,
+		Message:        "downloading",
+		UpdatedAt:      1234567890000,
+	})
 	client := env.loginClient(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -87,6 +97,22 @@ func TestEventsSSE(t *testing.T) {
 	}
 	if len(event.Nodes) != 3 {
 		t.Fatalf("snapshot nodes=%d want 3", len(event.Nodes))
+	}
+	var nodeA *eventNode
+	for i := range event.Nodes {
+		if event.Nodes[i].ID == "node-a" {
+			nodeA = &event.Nodes[i]
+			break
+		}
+	}
+	if nodeA == nil {
+		t.Fatal("snapshot missing node-a")
+	}
+	if nodeA.Update == nil || nodeA.Update.State != protocol.UpdateDownloading || nodeA.Update.Progress != 42 {
+		t.Fatalf("snapshot update status=%+v", nodeA.Update)
+	}
+	if nodeA.Version != "1.2.3" {
+		t.Fatalf("snapshot version=%q", nodeA.Version)
 	}
 	if event.TS <= 0 {
 		t.Fatalf("snapshot ts=%d", event.TS)
