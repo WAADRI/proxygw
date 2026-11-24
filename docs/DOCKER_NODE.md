@@ -130,6 +130,7 @@ docker compose -f deploy/docker-compose.client.yml -p node-2 --env-file .env.nod
 | `TLS_SERVER_NAME` | 覆盖 SNI/证书校验名 | 连接地址与证书 SAN 不一致时使用 |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` | `info` |
 | `EGRESS_IP` / `EGRESS_IP6` | 手动指定出口 IP（覆盖自动探测） | 可选 |
+| `EGRESS_ECHO_URLS_V4` / `EGRESS_ECHO_URLS_V6` | 节点自己的出口 IP 探测端点，逗号分隔；不配置使用内置默认值。只影响本节点，不是服务端的 `geo.egress.*` | 可选 |
 
 ## 6. 验证节点是否接入成功
 

@@ -39,6 +39,9 @@ services:
       TLS_KEY_FILE: ${TLS_KEY_FILE:-}
       EGRESS_IP: ${EGRESS_IP:-}
       EGRESS_IP6: ${EGRESS_IP6:-}
+      # 节点自己的出口 IP 探测端点，逗号分隔；与服务端 geo.egress.* 无关
+      EGRESS_ECHO_URLS_V4: ${EGRESS_ECHO_URLS_V4:-}
+      EGRESS_ECHO_URLS_V6: ${EGRESS_ECHO_URLS_V6:-}
     volumes:
       # 命名卷默认按 CLIENT_ID 命名，避免一机多节点共用 state；也可改用 bind mount
       - proxygw-client-state:/var/lib/proxygw/state
