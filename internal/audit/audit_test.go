@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,78 @@ import (
 
 	"proxygw/internal/model"
 )
+
+func TestQueryRingNewestPage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := New(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 300; i++ {
+		if err := s.Log(model.AuditEvent{Action: "e", Object: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := s.Query(Filter{Limit: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 200 || items[0].Object != "299" || items[199].Object != "100" {
+		t.Fatalf("ring page len=%d first=%q last=%q", len(items), items[0].Object, items[len(items)-1].Object)
+	}
+}
+
+func TestQueryFileTailFilter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	s, err := New(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 30; i++ {
+		action := "skip"
+		if i%3 == 0 {
+			action = "hit"
+		}
+		if err := s.Log(model.AuditEvent{Action: action, Object: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Force the file path instead of the in-memory ring.
+	s.mu.Lock()
+	s.ring = nil
+	s.mu.Unlock()
+	items, err := s.Query(Filter{Action: "HIT", Limit: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 || items[0].Object != "27" || items[1].Object != "24" || items[2].Object != "21" {
+		t.Fatalf("tail filter = %+v", items)
+	}
+}
+
+func TestAuditRotation(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.jsonl")
+	s, err := NewWithOptions(path, true, Options{MaxSize: 1, MaxBackups: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := s.Log(model.AuditEvent{Action: "rotate", Object: fmt.Sprint(i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(path + ".1"); err != nil {
+		t.Fatalf("rotated backup missing: %v", err)
+	}
+	items, err := s.Query(Filter{Action: "rotate", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Object != "2" {
+		t.Fatalf("post-rotation query = %+v", items)
+	}
+}
 
 func TestLogAndQueryPersisted(t *testing.T) {
 	dir := t.TempDir()

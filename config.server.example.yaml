@@ -180,6 +180,8 @@ observability:
 audit:
   enabled: true
   path: ""               # 默认 <state_dir>/runtime-audit.jsonl
+  max_size_mb: 128       # 单个 JSONL 文件达到该大小后轮转；0 表示不轮转
+  max_backups: 3         # 保留 runtime-audit.jsonl.1 ... .N
 
 security:
   # 仅本地开发可设为 true：允许弱口令/示例令牌、跳过部分安全校验。生产必须 false。

@@ -59,7 +59,10 @@ func (s *Server) initGateway() error {
 	if err != nil {
 		return fmt.Errorf("app: load rules: %w", err)
 	}
-	auditStore, err := audit.New(cfg.AuditPath(), cfg.Audit.Enabled)
+	auditStore, err := audit.NewWithOptions(cfg.AuditPath(), cfg.Audit.Enabled, audit.Options{
+		MaxSize:    int64(cfg.Audit.MaxSizeMB) * 1024 * 1024,
+		MaxBackups: cfg.Audit.MaxBackups,
+	})
 	if err != nil {
 		return fmt.Errorf("app: init audit store: %w", err)
 	}

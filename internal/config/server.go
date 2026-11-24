@@ -163,8 +163,10 @@ type ObservabilityConfig struct {
 
 // AuditConfig configures the JSONL audit trail.
 type AuditConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Path    string `yaml:"path"` // empty = <state_dir>/runtime-audit.jsonl
+	Enabled    bool   `yaml:"enabled"`
+	Path       string `yaml:"path"`        // empty = <state_dir>/runtime-audit.jsonl
+	MaxSizeMB  int    `yaml:"max_size_mb"` // 0 disables rotation
+	MaxBackups int    `yaml:"max_backups"`
 }
 
 // SecurityConfig holds explicit opt-outs for development warnings.
@@ -253,7 +255,7 @@ func DefaultServerConfig() *ServerConfig {
 			WebhookTimeout: model.D(time.Second * 5),
 			TrendRetention: model.D(time.Minute * 15),
 		},
-		Audit: AuditConfig{Enabled: true},
+		Audit: AuditConfig{Enabled: true, MaxSizeMB: 128, MaxBackups: 3},
 	}
 }
 
@@ -366,6 +368,16 @@ func (c *ServerConfig) Validate() error {
 				return fieldErr(fmt.Sprintf("proxy.auth_ban.exempt[%d]", i), "invalid IP or CIDR %q", raw)
 			}
 		}
+	}
+	// Audit retention / rotation.
+	if c.Audit.MaxSizeMB < 0 || c.Audit.MaxSizeMB > 10240 {
+		return fieldErr("audit.max_size_mb", "must be between 0 and 10240 (0 disables rotation)")
+	}
+	if c.Audit.MaxBackups < 0 || c.Audit.MaxBackups > 20 {
+		return fieldErr("audit.max_backups", "must be between 0 and 20")
+	}
+	if c.Audit.MaxSizeMB > 0 && c.Audit.MaxBackups < 1 {
+		return fieldErr("audit.max_backups", "must be at least 1 when audit rotation is enabled")
 	}
 	// Tunnel.
 	switch c.Tunnel.Transport {
