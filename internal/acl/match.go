@@ -123,6 +123,7 @@ type verdict struct {
 	allowed        bool
 	ruleID         string
 	forced         bool
+	routeGroups    []string
 	reason         string // set for forced deny decisions
 	matched        *compiledRule
 	defaultAction  string // raw value returned by the default action provider
@@ -145,11 +146,15 @@ func (e *Engine) evaluate(t model.RequestTarget) verdict {
 	e.mu.RUnlock()
 	for i := range rules {
 		if rules[i].matches(info) {
-			return verdict{
-				allowed: rules[i].action == model.ActionAllow,
+			verdict := verdict{
+				allowed: rules[i].action != model.ActionDeny,
 				ruleID:  rules[i].raw.ID,
 				matched: &rules[i],
 			}
+			if rules[i].action == model.ActionRoute {
+				verdict.routeGroups = append([]string(nil), rules[i].groups...)
+			}
+			return verdict
 		}
 	}
 	allowed, raw, invalid, panicked := e.defaultDecision()
@@ -207,8 +212,10 @@ func callDefaultAction(fn func() string) (raw string, panicked bool) {
 func explainReason(v verdict) string {
 	if v.matched != nil {
 		action := model.ActionAllow
-		if !v.allowed {
+		if v.matched.action == model.ActionDeny {
 			action = model.ActionDeny
+		} else if v.matched.action == model.ActionRoute {
+			action = model.ActionRoute
 		}
 		if v.matched.raw.ID != "" {
 			return fmt.Sprintf("matched %s rule id=%q order=%d", action, v.matched.raw.ID, v.matched.raw.Order)

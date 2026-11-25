@@ -364,10 +364,14 @@ func (p *pipeline) authenticateHTTP(proxyAuthorization, sourceIP, protocolName s
 }
 
 // resolveCandidates returns the enabled and online nodes visible to the
-// credential. An empty or failed resolution is a hard fail-closed condition.
-func (p *pipeline) resolveCandidates(cred *model.Credential, protocolName, traceHex, username string) ([]*model.Node, *proxyError) {
+// credential. forcedGroups, when non-empty, overrides the credential groups
+// (route ACL rules). An empty or failed resolution is a hard fail-closed
+// condition.
+func (p *pipeline) resolveCandidates(cred *model.Credential, forcedGroups []string, protocolName, traceHex, username string) ([]*model.Node, *proxyError) {
 	var groups []string
-	if cred != nil {
+	if len(forcedGroups) > 0 {
+		groups = forcedGroups
+	} else if cred != nil {
 		groups = cred.Groups
 	}
 	nodes, err := p.candidates.Candidates(groups)
@@ -395,14 +399,24 @@ func (p *pipeline) resolveCandidates(cred *model.Credential, protocolName, trace
 	return usable, nil
 }
 
-// checkACL applies the access control engine, if any. Denials are audited.
-func (p *pipeline) checkACL(target model.RequestTarget, traceHex, username string) *proxyError {
+// checkACL applies the access control engine, if any. Denials are audited. The
+// returned groups come from a matching route rule and override credential
+// groups when resolving candidates.
+func (p *pipeline) checkACL(target model.RequestTarget, traceHex, username string) ([]string, *proxyError) {
 	if p.acl == nil {
-		return nil
+		return nil, nil
 	}
-	err := p.acl.Check(target)
+	var (
+		groups []string
+		err    error
+	)
+	if router, ok := p.acl.(ACLGroupRouter); ok {
+		groups, err = router.ForcedGroups(target)
+	} else {
+		err = p.acl.Check(target)
+	}
 	if err == nil {
-		return nil
+		return groups, nil
 	}
 	detail := map[string]string{
 		"protocol":  target.Protocol,
@@ -416,7 +430,7 @@ func (p *pipeline) checkACL(target model.RequestTarget, traceHex, username strin
 		detail["error"] = err.Error()
 	}
 	p.auditEvent("proxy.acl_denied", detail)
-	return errACLDenied(err)
+	return nil, errACLDenied(err)
 }
 
 // acquire reserves one global slot and, when configured, one slot of the

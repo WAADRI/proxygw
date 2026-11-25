@@ -79,6 +79,7 @@
 - `PATCH /rules/acl/{id}`：部分字段
 - `DELETE /rules/acl/{id}` → `{ok:true}`
 - `GET /rules/acl/forced` → `{items:[{name,cidrs,ports,reason}]}`（不可关闭清单）
+- ACLRule 的 `action` 为 `allow` / `deny` / `route`；`route` 必须同时提供非空 `node_groups`，命中的目标会强制使用这些节点组并覆盖凭据绑定的组（组内无可用节点时 fail-closed 503）。
 - `GET /rules/sticky` → `{items:[StickyRule]}`
 - `POST /rules/sticky` / `PATCH /rules/sticky/{id}` / `DELETE /rules/sticky/{id}`
 - `POST /rules/sticky/preview`：`{host?,ip?,port?,node_id?,groups?}` → `{hit:true, rule_id, reason, forced_node_id}`（试算命中）

@@ -19,6 +19,7 @@ type compiledRule struct {
 	domains   []domainMatcher
 	ports     []portRange
 	protocols map[string]struct{} // nil means any protocol
+	groups    []string            // route action: forced node groups
 }
 
 // domainKind selects how a domain rule entry is matched against a target host.
@@ -76,10 +77,18 @@ func compileRule(r model.ACLRule) (*compiledRule, error) {
 	cr := &compiledRule{raw: r}
 	action := strings.ToLower(strings.TrimSpace(r.Action))
 	switch action {
-	case model.ActionAllow, model.ActionDeny:
+	case model.ActionAllow, model.ActionDeny, model.ActionRoute:
 		cr.action = action
 	default:
-		return nil, fmt.Errorf("action %q: must be %q or %q", r.Action, model.ActionAllow, model.ActionDeny)
+		return nil, fmt.Errorf("action %q: must be %q, %q or %q", r.Action, model.ActionAllow, model.ActionDeny, model.ActionRoute)
+	}
+	if action == model.ActionRoute {
+		if len(r.NodeGroups) == 0 {
+			return nil, fmt.Errorf("node_groups: route action requires at least one group")
+		}
+		cr.groups = append([]string(nil), r.NodeGroups...)
+	} else if len(r.NodeGroups) > 0 {
+		return nil, fmt.Errorf("node_groups: only valid for route action")
 	}
 	for i, raw := range r.SrcCIDRs {
 		n, err := parseCIDROrIP(raw)
@@ -128,6 +137,7 @@ func cloneRules(in []model.ACLRule) []model.ACLRule {
 		out[i].Domains = cloneStrings(in[i].Domains)
 		out[i].Ports = cloneStrings(in[i].Ports)
 		out[i].Protocols = cloneStrings(in[i].Protocols)
+		out[i].NodeGroups = cloneStrings(in[i].NodeGroups)
 	}
 	return out
 }

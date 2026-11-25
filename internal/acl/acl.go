@@ -126,17 +126,35 @@ func (e *Engine) Check(t model.RequestTarget) error {
 // human-readable reason.
 func (e *Engine) Explain(t model.RequestTarget) Decision {
 	v := e.evaluate(t)
-	return Decision{Allowed: v.allowed, RuleID: v.ruleID, Forced: v.forced, Reason: explainReason(v)}
+	return Decision{
+		Allowed:    v.allowed,
+		RuleID:     v.ruleID,
+		Forced:     v.forced,
+		NodeGroups: append([]string(nil), v.routeGroups...),
+		Reason:     explainReason(v),
+	}
+}
+
+// ForcedGroups evaluates the target and returns the node groups forced by a
+// matching route rule. A denied target returns the same error as Check; an
+// allowed target without a route rule returns nil groups.
+func (e *Engine) ForcedGroups(t model.RequestTarget) ([]string, error) {
+	v := e.evaluate(t)
+	if !v.allowed {
+		return nil, &DeniedError{RuleID: v.ruleID, Forced: v.forced, Reason: explainReason(v)}
+	}
+	return append([]string(nil), v.routeGroups...), nil
 }
 
 // Decision is the readable result of Explain. RuleID names the operator rule or
 // the forced rule that decided the request; it is empty when the default action
 // decided.
 type Decision struct {
-	Allowed bool   `json:"allowed"`
-	RuleID  string `json:"rule_id"`
-	Forced  bool   `json:"forced"`
-	Reason  string `json:"reason"`
+	Allowed    bool     `json:"allowed"`
+	RuleID     string   `json:"rule_id"`
+	Forced     bool     `json:"forced"`
+	NodeGroups []string `json:"node_groups,omitempty"`
+	Reason     string   `json:"reason"`
 }
 
 // DeniedError is returned by Check when a request is denied. Forced reports

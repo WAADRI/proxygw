@@ -92,6 +92,7 @@ const (
 const (
 	ActionAllow = "allow"
 	ActionDeny  = "deny"
+	ActionRoute = "route" // force the matching node groups, overriding credential groups
 )
 
 // Breaker states (与状态机设计第 5 章一致).
@@ -359,16 +360,17 @@ type StickyRule struct {
 
 // ACLRule is one ordered access control rule.
 type ACLRule struct {
-	ID        string    `json:"id"`
-	Order     int       `json:"order"`
-	SrcCIDRs  []string  `json:"src_cidrs,omitempty"`
-	Domains   []string  `json:"domains,omitempty"`
-	Ports     []string  `json:"ports,omitempty"` // single ports and ranges, e.g. "443", "8000-9000"
-	Protocols []string  `json:"protocols,omitempty"`
-	Action    string    `json:"action"` // allow | deny
-	Note      string    `json:"note,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	Order      int       `json:"order"`
+	SrcCIDRs   []string  `json:"src_cidrs,omitempty"`
+	Domains    []string  `json:"domains,omitempty"`
+	Ports      []string  `json:"ports,omitempty"` // single ports and ranges, e.g. "443", "8000-9000"
+	Protocols  []string  `json:"protocols,omitempty"`
+	Action     string    `json:"action"`                // allow | deny | route
+	NodeGroups []string  `json:"node_groups,omitempty"` // route: force these groups
+	Note       string    `json:"note,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // BreakerSettings configures the per-node circuit breaker.

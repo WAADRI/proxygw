@@ -1,8 +1,40 @@
 package app
 
 import (
+	"io"
+	"log/slog"
 	"testing"
+
+	"proxygw/internal/auth"
+	"proxygw/internal/model"
 )
+
+func TestPanelDepsRecordsCredentialUsage(t *testing.T) {
+	store, err := auth.NewCredentialStore("", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	hash, err := auth.HashPassword("panel-pass-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cred, err := store.Create(model.Credential{Username: "usage-user", PasswordHash: hash, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newPanelDeps()
+	d.credStore = store
+	d.onRequestStart(cred.ID, "http", "example.com:443", "node-a")
+	d.onRequestEnd(cred.ID, "http", "example.com:443", "node-a", 10, 20, nil)
+	got, ok := store.Get(cred.ID)
+	if !ok {
+		t.Fatal("credential disappeared")
+	}
+	if got.BytesIn != 10 || got.BytesOut != 20 || got.LastUsedAt == nil {
+		t.Fatalf("credential usage = %+v", got)
+	}
+}
 
 func TestPanelDepsTracksActiveRequests(t *testing.T) {
 	d := newPanelDeps()

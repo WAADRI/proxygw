@@ -33,6 +33,7 @@ type panelDeps struct {
 	targets      *stats.TopN
 	nodes        *stats.TopN
 	credentials  *stats.TopN
+	credStore    *auth.CredentialStore
 	activeByCred map[string]int64
 	active       int64
 }
@@ -82,6 +83,18 @@ func (d *panelDeps) onRequestEnd(credentialID, protocolName, target, nodeID stri
 	}
 	if credentialID != "" {
 		d.credentials.Record(credentialID, total, !ok)
+		// The panel credentials page reads the persistent credential counters,
+		// not the short-lived TopN stats; update both so "最近使用/用量" is real.
+		if d.credStore != nil {
+			in, out := bytesIn, bytesOut
+			if in < 0 {
+				in = 0
+			}
+			if out < 0 {
+				out = 0
+			}
+			_ = d.credStore.MarkUsed(credentialID, uint64(in), uint64(out))
+		}
 	}
 	d.trend.Record(1, boolToInt64(!ok), active)
 }
@@ -107,6 +120,7 @@ func (d *panelDeps) activeCredentialSessions(credentialID string) int64 {
 // initPanel builds the admin manager and the panel server.
 func (s *Server) initPanel() error {
 	cfg := s.cfg
+	s.panelDeps.credStore = s.gateway.creds
 	admin, err := auth.NewAdminManager(auth.AdminOptions{
 		Username:        cfg.Admin.Username,
 		PasswordHash:    cfg.Admin.PasswordHash,
@@ -153,9 +167,10 @@ func (s *Server) initPanel() error {
 			// to finish naturally; the panel can still report the live count.
 			return int(s.panelDeps.activeCredentialSessions(credentialID))
 		},
-		ServerURL:  publicBaseURL(cfg),
-		WebFS:      web.Assets,
-		CookieName: cfg.Admin.CookieName,
+		ActiveCredentialSessions: s.panelDeps.activeCredentialSessions,
+		ServerURL:                publicBaseURL(cfg),
+		WebFS:                    web.Assets,
+		CookieName:               cfg.Admin.CookieName,
 	})
 	if err != nil {
 		return fmt.Errorf("app: init panel: %w", err)

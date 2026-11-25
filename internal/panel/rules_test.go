@@ -142,6 +142,26 @@ func TestACLReplaceAndValidation(t *testing.T) {
 	}
 }
 
+func TestACLRouteRuleForcedGroups(t *testing.T) {
+	env := newTestEnv(t)
+	client := env.loginClient(t)
+	var rule model.ACLRule
+	status := client.doJSON(http.MethodPost, "/api/v1/rules/acl", map[string]any{
+		"order":       1,
+		"action":      "route",
+		"domains":     []string{"cn.example"},
+		"node_groups": []string{"cn-edge"},
+	}, &rule)
+	if status != http.StatusOK {
+		t.Fatalf("route create status=%d", status)
+	}
+	target := model.RequestTarget{Protocol: model.ProtoHTTP, Host: "cn.example", Port: 443}
+	groups, err := env.aclEng.ForcedGroups(target)
+	if err != nil || len(groups) != 1 || groups[0] != "cn-edge" {
+		t.Fatalf("forced groups=%v err=%v", groups, err)
+	}
+}
+
 // TestACLForcedList checks the built-in forced deny list exposure.
 func TestACLForcedList(t *testing.T) {
 	env := newTestEnv(t)

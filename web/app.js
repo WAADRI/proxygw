@@ -1743,7 +1743,6 @@
     var legend = $('overview-sparkline-legend');
     var note = $('overview-trend-note');
     if (!container) return;
-    if (legend) legend.replaceChildren();
     var raw = Array.isArray(rawTrend) ? rawTrend.slice() : [];
     var points = [];
     raw.forEach(function (point) {
@@ -1753,7 +1752,9 @@
     });
     points.sort(function (a, b) { return a._ms - b._ms; });
     if (!points.length) {
+      container.dataset.sparkSig = '';
       container.replaceChildren(el('div', 'spark-empty', '暂无趋势数据（服务端未返回 trend，可能刚启动或趋势缓冲为空）'));
+      if (legend) legend.replaceChildren();
       if (note) note.textContent = '';
       return;
     }
@@ -1761,10 +1762,24 @@
     var lastMs = points[points.length - 1]._ms;
     var trend = points.filter(function (point) { return point._ms >= lastMs - windowMs; });
     if (!trend.length) {
+      container.dataset.sparkSig = '';
       container.replaceChildren(el('div', 'spark-empty', '最近 15 分钟暂无趋势数据'));
+      if (legend) legend.replaceChildren();
       if (note) note.textContent = '';
       return;
     }
+    // The overview is refreshed by SSE every 3 seconds, but the trend series
+    // only changes every 15 seconds. Do not rebuild the SVG when the data is
+    // unchanged: replacing the DOM hides the hover tooltip until the mouse
+    // moves again.
+    var sig = JSON.stringify(trend.map(function (point) {
+      return [point.ts, Number(point.requests) || 0, Number(point.errors) || 0, Number(point.active) || 0];
+    }));
+    if (container.dataset.sparkSig === sig && container.querySelector('svg')) {
+      return;
+    }
+    container.dataset.sparkSig = sig;
+    if (legend) legend.replaceChildren();
     var series = [
       { key: 'requests', label: '请求', cls: 'requests', color: 'swatch-requests' },
       { key: 'errors', label: '错误', cls: 'errors', color: 'swatch-errors' },
@@ -1923,14 +1938,26 @@
       tip.style.top = Math.max(4, top) + 'px';
     }
 
-    svg.addEventListener('mousemove', showTip);
-    svg.addEventListener('mouseleave', hideTip);
+    svg.addEventListener('mousemove', function (evt) {
+      container._sparkHover = { clientX: evt.clientX, clientY: evt.clientY };
+      showTip(evt);
+    });
+    svg.addEventListener('mouseleave', function () {
+      container._sparkHover = null;
+      hideTip();
+    });
     svg.addEventListener('touchstart', function (evt) {
       if (evt.touches && evt.touches.length) {
         var touch = evt.touches[0];
+        container._sparkHover = null;
         showTip({ clientX: touch.clientX, clientY: touch.clientY });
       }
     }, { passive: true });
+    // When a new trend point does arrive while the pointer stays over the
+    // chart, keep the tooltip visible at the same position.
+    if (container._sparkHover && container.matches(':hover')) {
+      showTip(container._sparkHover);
+    }
 
     if (note) {
       note.textContent = '窗口：15 分钟 · 数据点 ' + trend.length + ' 个 · 从 ' +
@@ -4120,17 +4147,19 @@
     if (summary) {
       var allowCount = items.filter(function (r) { return r.action === 'allow'; }).length;
       var denyCount = items.filter(function (r) { return r.action === 'deny'; }).length;
+      var routeCount = items.filter(function (r) { return r.action === 'route'; }).length;
       var defaultAction = state.acl.defaultAction ||
         (state.settings && state.settings.current && state.settings.current.default_acl_action) || 'allow';
       summary.replaceChildren(
         summaryChip('规则数', items.length),
         summaryChip('allow', allowCount),
         summaryChip('deny', denyCount),
+        summaryChip('route', routeCount),
         summaryChip('默认动作', defaultAction === 'deny' ? 'deny（拒绝）' : 'allow（放行）')
       );
     }
     if (!items.length) {
-      emptyRow(tbody, 8, '还没有 ACL 规则。未命中任何规则时按默认动作处理。');
+      emptyRow(tbody, 9, '还没有 ACL 规则。未命中任何规则时按默认动作处理。');
       return;
     }
     var frag = document.createDocumentFragment();
@@ -4146,8 +4175,16 @@
       protocols.append((rule.protocols || []).length ? wrap : el('span', 'cell-sub', '—'));
       tr.append(protocols);
       var action = el('td');
-      action.append(rule.action === 'deny' ? badge('deny', 'deny') : badge('allow', 'allow'));
+      if (rule.action === 'deny') action.append(badge('deny', 'deny'));
+      else if (rule.action === 'route') action.append(badge('route', 'info'));
+      else action.append(badge('allow', 'allow'));
       tr.append(action);
+      var groupsCell = el('td');
+      var groupNamesList = groupNames(rule.node_groups || []);
+      var groupsWrap = el('span', 'cell-chips');
+      groupNamesList.forEach(function (name) { groupsWrap.append(el('span', 'tag', name)); });
+      groupsCell.append(groupNamesList.length ? groupsWrap : el('span', 'cell-sub', '—'));
+      tr.append(groupsCell);
       tr.append(el('td', 'col-name', rule.note || '—'));
       var tdActions = el('td', 'col-actions');
       var actions = el('span', 'row-actions');
@@ -4192,14 +4229,24 @@
     });
     var action = field({
       label: '动作', name: 'action', type: 'select', value: current.action || 'allow',
-      options: [{ value: 'allow', label: 'allow（放行）' }, { value: 'deny', label: 'deny（拒绝）' }]
+      options: [
+        { value: 'allow', label: 'allow（放行）' },
+        { value: 'deny', label: 'deny（拒绝）' },
+        { value: 'route', label: 'route（强制走节点组）' }
+      ]
+    });
+    var nodeGroups = checkGroupField({
+      label: '强制节点组（仅 route 动作）', name: 'node_groups',
+      options: state.groups.items.map(function (group) { return { value: group.id, label: group.name || group.id }; }),
+      value: current.node_groups || [],
+      hint: '命中目标后强制使用这些节点组，覆盖凭据绑定的节点组；allow/deny 不使用此字段。'
     });
     var note = field({ label: '备注', name: 'note', value: current.note || '', placeholder: '可选' });
 
     formModal({
       title: isEdit ? '编辑 ACL 规则' : '新建 ACL 规则',
-      note: '规则按 order 从小到大匹配，首条命中生效。强制默认拒绝清单不可关闭，只能追加规则。',
-      fields: [order, action, srcCIDRs, domains, ports, protocols, note],
+      note: '规则按 order 从小到大匹配，首条命中生效。route 规则会把目标强制路由到指定节点组；强制默认拒绝清单不可关闭。',
+      fields: [order, action, srcCIDRs, domains, ports, protocols, nodeGroups, note],
       submitText: isEdit ? '保存' : '创建',
       onSubmit: function () {
         var payload = {
@@ -4209,6 +4256,7 @@
           ports: splitList(ports.value),
           protocols: protocols.getValues(),
           action: action.value,
+          node_groups: action.value === 'route' ? nodeGroups.getValues() : [],
           note: note.value.trim()
         };
         var request = isEdit
@@ -4999,10 +5047,10 @@
     },
     'auth-bans-refresh': function () { refreshAuthBans(); },
     'auth-ban-unban': function (target) { unbanAuthSource(target.dataset.ip); },
-    'acl-new': function () { openACLForm(null); },
+    'acl-new': function () { ensureGroups().then(function () { openACLForm(null); }); },
     'acl-edit': function (target) {
       var rule = findACL(target.dataset.id);
-      if (rule) openACLForm(rule);
+      if (rule) ensureGroups().then(function () { openACLForm(rule); });
     },
     'acl-delete': function (target) {
       var rule = findACL(target.dataset.id);

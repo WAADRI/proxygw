@@ -797,14 +797,15 @@ func (h *HTTPProxy) serveHTTP(ctx context.Context, conn net.Conn, br *bufio.Read
 		return false, current
 	}
 	defer release()
-	candidates, perr := p.resolveCandidates(cred, model.ProtoHTTP, traceHex, target.Username)
+	forcedGroups, perr := p.checkACL(target, traceHex, target.Username)
 	if perr != nil {
 		trackErr = perr
 		p.finishRequest(model.ProtoHTTP, traceHex, target.String(), target.Username, target.Credential, "", perr.reason, start, perr)
 		h.writeErrorResponse(conn, perr)
 		return false, current
 	}
-	if perr := p.checkACL(target, traceHex, target.Username); perr != nil {
+	candidates, perr := p.resolveCandidates(cred, forcedGroups, model.ProtoHTTP, traceHex, target.Username)
+	if perr != nil {
 		trackErr = perr
 		p.finishRequest(model.ProtoHTTP, traceHex, target.String(), target.Username, target.Credential, "", perr.reason, start, perr)
 		h.writeErrorResponse(conn, perr)
@@ -1217,14 +1218,15 @@ func (h *HTTPProxy) serveConnect(ctx context.Context, conn net.Conn, br *bufio.R
 		return
 	}
 	defer release()
-	candidates, perr := p.resolveCandidates(cred, model.ProtoConnect, traceHex, target.Username)
+	forcedGroups, perr := p.checkACL(target, traceHex, target.Username)
 	if perr != nil {
 		trackErr = perr
 		p.finishRequest(model.ProtoConnect, traceHex, target.String(), target.Username, target.Credential, "", perr.reason, start, perr)
 		h.writeErrorResponse(conn, perr)
 		return
 	}
-	if perr := p.checkACL(target, traceHex, target.Username); perr != nil {
+	candidates, perr := p.resolveCandidates(cred, forcedGroups, model.ProtoConnect, traceHex, target.Username)
+	if perr != nil {
 		trackErr = perr
 		p.finishRequest(model.ProtoConnect, traceHex, target.String(), target.Username, target.Credential, "", perr.reason, start, perr)
 		h.writeErrorResponse(conn, perr)

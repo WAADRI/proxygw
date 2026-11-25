@@ -184,14 +184,15 @@ func (s *SOCKS5Proxy) handleConn(ctx context.Context, conn net.Conn) {
 		return
 	}
 	defer release()
-	candidates, perr := p.resolveCandidates(cred, model.ProtoSOCKS5, traceHex, target.Username)
+	forcedGroups, perr := p.checkACL(target, traceHex, target.Username)
 	if perr != nil {
 		s.writeReply(conn, t, perr.reply)
 		trackErr = perr
 		p.finishRequest(model.ProtoSOCKS5, traceHex, target.String(), target.Username, target.Credential, "", perr.reason, start, perr)
 		return
 	}
-	if perr := p.checkACL(target, traceHex, target.Username); perr != nil {
+	candidates, perr := p.resolveCandidates(cred, forcedGroups, model.ProtoSOCKS5, traceHex, target.Username)
+	if perr != nil {
 		s.writeReply(conn, t, perr.reply)
 		trackErr = perr
 		p.finishRequest(model.ProtoSOCKS5, traceHex, target.String(), target.Username, target.Credential, "", perr.reason, start, perr)

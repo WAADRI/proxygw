@@ -22,13 +22,14 @@ type aclForcedResponse struct {
 
 // aclRuleRequest is the create/update body for ACL rules.
 type aclRuleRequest struct {
-	Order     *int      `json:"order"`
-	SrcCIDRs  *[]string `json:"src_cidrs"`
-	Domains   *[]string `json:"domains"`
-	Ports     *[]string `json:"ports"`
-	Protocols *[]string `json:"protocols"`
-	Action    *string   `json:"action"`
-	Note      *string   `json:"note"`
+	Order      *int      `json:"order"`
+	SrcCIDRs   *[]string `json:"src_cidrs"`
+	Domains    *[]string `json:"domains"`
+	Ports      *[]string `json:"ports"`
+	Protocols  *[]string `json:"protocols"`
+	Action     *string   `json:"action"`
+	NodeGroups *[]string `json:"node_groups"`
+	Note       *string   `json:"note"`
 }
 
 // apply copies the provided fields onto rule.
@@ -50,6 +51,9 @@ func (req *aclRuleRequest) apply(rule *model.ACLRule) {
 	}
 	if req.Action != nil {
 		rule.Action = strings.ToLower(strings.TrimSpace(*req.Action))
+	}
+	if req.NodeGroups != nil {
+		rule.NodeGroups = *req.NodeGroups
 	}
 	if req.Note != nil {
 		rule.Note = strings.TrimSpace(*req.Note)

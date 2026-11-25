@@ -68,6 +68,13 @@ type ACLChecker interface {
 	Check(t model.RequestTarget) error
 }
 
+// ACLGroupRouter is an optional extension implemented by the ACL engine. It
+// evaluates the same ordered rules as Check and additionally returns the node
+// groups forced by a matching route rule.
+type ACLGroupRouter interface {
+	ForcedGroups(t model.RequestTarget) ([]string, error)
+}
+
 // StreamDialer opens one tunnel stream through a node. The returned stream is a
 // bidirectional byte pipe with half-close support.
 type StreamDialer interface {

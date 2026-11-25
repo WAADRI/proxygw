@@ -55,6 +55,9 @@ type Options struct {
 	// KickCredential immediately closes every existing proxy session of the
 	// credential and returns how many were kicked. Provided by app.
 	KickCredential func(credentialID string) int
+	// ActiveCredentialSessions reports the current in-flight request count for
+	// one credential. It is optional; nil reports 0.
+	ActiveCredentialSessions func(credentialID string) int64
 	// ServerURL is the externally reachable panel/tunnel base URL used to build
 	// the node install command.
 	ServerURL string

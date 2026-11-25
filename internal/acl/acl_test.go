@@ -85,6 +85,45 @@ func TestRuleOrderAllowBeforeDeny(t *testing.T) {
 	}
 }
 
+func TestRouteActionReturnsForcedGroups(t *testing.T) {
+	e := newEngineWithDefault(t, model.ActionAllow)
+	mustSetRules(t, e, model.ACLRule{
+		ID:         "route-cn",
+		Order:      1,
+		Domains:    []string{"*.example.cn"},
+		Action:     model.ActionRoute,
+		NodeGroups: []string{"cn-edge", "cn-home"},
+	})
+	target := mkTarget(model.ProtoHTTP, "www.example.cn", 443, "")
+	requireAllowed(t, e, target)
+	groups, err := e.ForcedGroups(target)
+	if err != nil {
+		t.Fatalf("ForcedGroups: %v", err)
+	}
+	if len(groups) != 2 || groups[0] != "cn-edge" || groups[1] != "cn-home" {
+		t.Fatalf("forced groups = %v", groups)
+	}
+	if d := e.Explain(target); !d.Allowed || d.RuleID != "route-cn" || len(d.NodeGroups) != 2 {
+		t.Fatalf("Explain = %+v", d)
+	}
+	// The route rule must not match unrelated targets; default allow yields no
+	// forced groups.
+	groups, err = e.ForcedGroups(mkTarget(model.ProtoHTTP, "example.com", 443, ""))
+	if err != nil || len(groups) != 0 {
+		t.Fatalf("non-matching groups = %v err=%v", groups, err)
+	}
+}
+
+func TestRouteActionRejectsEmptyGroups(t *testing.T) {
+	e := newEngineWithDefault(t, model.ActionAllow)
+	if err := e.SetRules([]model.ACLRule{{
+		Action:  model.ActionRoute,
+		Domains: []string{"example.com"},
+	}}); err == nil {
+		t.Fatal("route with no node_groups must be rejected")
+	}
+}
+
 func TestRuleOrderDenyBeforeAllow(t *testing.T) {
 	e := newEngineWithDefault(t, model.ActionAllow)
 	mustSetRules(t, e,

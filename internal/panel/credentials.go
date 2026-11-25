@@ -340,8 +340,8 @@ type credentialUsageResponse struct {
 }
 
 // handleCredentialUsage serves GET /credentials/{id}/usage. Active connections
-// are not tracked per credential by the existing stores; the field is present
-// for the API contract and stays 0 unless app wires a counter later.
+// come from the app's in-flight counter; the store supplies the persistent
+// usage counters.
 func (s *Server) handleCredentialUsage(w http.ResponseWriter, r *http.Request) {
 	credID := strings.TrimSpace(r.PathValue("id"))
 	cred, ok := s.opts.Auth.Get(credID)
@@ -349,10 +349,15 @@ func (s *Server) handleCredentialUsage(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusNotFound, "not_found", "代理凭据不存在", nil)
 		return
 	}
+	var active int64
+	if s.opts.ActiveCredentialSessions != nil {
+		active = s.opts.ActiveCredentialSessions(credID)
+	}
 	s.writeJSON(w, http.StatusOK, credentialUsageResponse{
-		LastUsedAt: cred.LastUsedAt,
-		BytesIn:    cred.BytesIn,
-		BytesOut:   cred.BytesOut,
+		LastUsedAt:        cred.LastUsedAt,
+		BytesIn:           cred.BytesIn,
+		BytesOut:          cred.BytesOut,
+		ActiveConnections: active,
 	})
 }
 

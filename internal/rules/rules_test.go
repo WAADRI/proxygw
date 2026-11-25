@@ -44,6 +44,12 @@ func TestACLCRUDAndValidation(t *testing.T) {
 	if _, err := s.UpsertACL(model.ACLRule{Action: model.ActionAllow, Protocols: []string{"ftp"}}); err == nil {
 		t.Fatal("invalid protocol must be rejected")
 	}
+	if _, err := s.UpsertACL(model.ACLRule{Action: model.ActionRoute, Domains: []string{"example.com"}}); err == nil {
+		t.Fatal("route without node_groups must be rejected")
+	}
+	if _, err := s.UpsertACL(model.ACLRule{Action: model.ActionAllow, NodeGroups: []string{"g1"}}); err == nil {
+		t.Fatal("node_groups on allow must be rejected")
+	}
 	// Persistence round trip through the same file.
 	if _, err := s.UpsertACL(model.ACLRule{Order: 1, Action: model.ActionDeny}); err != nil {
 		t.Fatal(err)

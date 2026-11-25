@@ -228,8 +228,14 @@ func (s *Store) persistLocked() error {
 func validateACL(list []model.ACLRule) error {
 	for i := range list {
 		r := &list[i]
-		if r.Action != model.ActionAllow && r.Action != model.ActionDeny {
-			return fmt.Errorf("acl[%d]: action must be allow or deny, got %q", i, r.Action)
+		if r.Action != model.ActionAllow && r.Action != model.ActionDeny && r.Action != model.ActionRoute {
+			return fmt.Errorf("acl[%d]: action must be allow, deny or route, got %q", i, r.Action)
+		}
+		if r.Action == model.ActionRoute && len(r.NodeGroups) == 0 {
+			return fmt.Errorf("acl[%d]: route action requires node_groups", i)
+		}
+		if r.Action != model.ActionRoute && len(r.NodeGroups) > 0 {
+			return fmt.Errorf("acl[%d]: node_groups is only valid for route action", i)
 		}
 		for _, p := range r.Protocols {
 			switch p {
