@@ -362,6 +362,14 @@ type aclAdapter struct{ engine *acl.Engine }
 
 func (a *aclAdapter) Check(t model.RequestTarget) error { return a.engine.Check(t) }
 
+// ForcedGroups is required by proxy.ACLGroupRouter. Without this method the
+// proxy layer only sees ACLChecker and silently ignores route-action groups.
+func (a *aclAdapter) ForcedGroups(t model.RequestTarget) ([]string, error) {
+	return a.engine.ForcedGroups(t)
+}
+
+var _ proxy.ACLGroupRouter = (*aclAdapter)(nil)
+
 type dialerAdapter struct {
 	tun *tunnel.Server
 	sel *sched.Selector
