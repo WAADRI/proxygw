@@ -1837,14 +1837,23 @@
 
     var innerW = width - pad.l - pad.r;
     var innerH = height - pad.t - pad.b;
+    // Use one shared y-axis maximum for all three series. Independent
+    // normalization made a small error count (e.g. 4) reach the top simply
+    // because errors had a small peak of their own, which looked alarming.
+    var sharedMax = 1;
+    series.forEach(function (s) {
+      trend.forEach(function (point) {
+        var v = Number(point && point[s.key]);
+        if (Number.isFinite(v) && v > sharedMax) sharedMax = v;
+      });
+    });
     var seriesData = [];
     series.forEach(function (s) {
       var values = trend.map(function (point) {
         var v = Number(point && point[s.key]);
         return Number.isFinite(v) ? v : 0;
       });
-      var max = Math.max.apply(null, values);
-      if (!(max > 0)) max = 1;
+      var max = sharedMax;
       var yFor = function (v) {
         return pad.t + innerH - (Math.max(0, v) / max) * innerH;
       };
@@ -1962,7 +1971,7 @@
     if (note) {
       note.textContent = '窗口：15 分钟 · 数据点 ' + trend.length + ' 个 · 从 ' +
         fmtTimeHM(trend[0].ts) + ' 到 ' + fmtTimeHM(last.ts) +
-        '（三条曲线各自独立归一化；悬停查看具体数值）';
+        '（三条曲线共用统一纵轴刻度；悬停查看具体数值）';
     }
   }
 
