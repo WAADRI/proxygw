@@ -34,8 +34,8 @@
 | 代理入口 | HTTP absolute-form 普通转发、CONNECT、Upgrade/101 透传、keep-alive、分块传输；SOCKS5（RFC1928/1929，仅 CONNECT）；三入口共用同一条认证→授权→选点→建流→转发管线 |
 | 授权 | 凭据多套、argon2id、组绑定、fail-closed（组内无节点返回 503，绝不回退全部节点）、禁用/过期即时踢会话、来源 CIDR/协议/并发/带宽限制 |
 | 调度 | random / least_inflight / fastest / weighted(SWRR)；会话粘性（TTL 滑动、每节点 key 上限）；粘性黑名单（来源 IP、目标与节点三维度，优先级最高）；熔断 closed/open/half_open；令牌桶限流；响应首字节前透明重试一次；ACL `route` 动作可按目标域名/IP/CIDR 强制节点组并覆盖凭据组 |
-| 节点元数据 | 出口 IP 三级来源（手工 > 隧道对端 > https 回声）；出口去重与「独立出口 IP 数」；MMDB + preset/template/schema 三层归属地 provider（禁止格式嗅探）；字段级 source；SSRF 防护；provider 测试按钮；节点拨测（ping/tcping/http/dns）；DNS 专项转发 |
-| 面板 | 登录（argon2id + JWT + 登录限速/锁定 + 可选 TOTP）、总览三指标、节点/组/凭据/规则 CRUD、运行设置热更+撤销、审计查询、SSE 实时推送 + 3s 轮询兜底 |
+| 节点元数据 | 出口 IP 由节点自行探测（手工 > HTTPS 回声，IPv4/IPv6 分别处理）；出口去重与「独立出口 IP 数」；MMDB + preset/template/schema 三层归属地 provider（禁止格式嗅探）；字段级 source；SSRF 防护；provider 测试按钮；节点拨测（ping/tcping/http/dns）；DNS 专项转发 |
+| 面板 | 登录（argon2id + JWT + 登录限速/锁定 + 可选 TOTP）、总览指标卡/趋势/证书/会话/TopN/运行设置、节点/组/凭据/规则 CRUD、运行设置热更+撤销、审计查询、SSE 实时推送 + 3s 轮询兜底 |
 | 可观测 | Prometheus 指标（请求/失败/延迟/连接/在线/唯一出口/隧道/熔断/限流/重试）、结构化 slog、`/healthz`、`/version`（ldflags 注入）、15 分钟内存趋势、Webhook 告警 |
 | 安全 | SPKI pin（多 pin + pin_next 轮换窗口）、ca 模式、自签证书自动生成、私钥权限校验、证书热重载、mTLS、per-node 令牌（常量时间比较、即时吊销）、ACL 强制默认拒绝清单、PROXY protocol v2、HttpOnly/Secure/SameSite Cookie、CSRF、CSP |
 | 增强 | IPv6 双栈、zstd 压缩、trace id 贯穿、TopN 目标统计、时钟偏移检测、一键接入脚本、Docker/compose/systemd |
@@ -210,7 +210,7 @@ UPDATE_PROXIES='https://gh-proxy.com/{url}'
 - 节点自检运行环境、二进制目录写权限后，下载 Release 并通过 `.sha256` 校验；
 - 节点把自身二进制复制成临时 helper，随后优雅退出；helper 等待旧进程退出后原子替换、重启，失败时回滚；
 - systemd 裸二进制优先通过 `systemctl restart` 重启，直接运行的二进制由 helper 直接启动；
-- 状态通过 `UPDATE_STATUS`/`STATS` 回传，面板显示：检查中、下载中、待重启、替换中、重启中、成功、失败、已回滚。
+- 状态通过 `UPDATE_STATUS`/`STATS` 回传，面板显示：检查中、下载中、已校验、待重启、替换中、重启中、成功、失败、已回滚。
 
 Windows 裸二进制也支持该流程（helper 从状态目录运行，不锁住目标 `.exe`）。更新命令本身不携带任意 URL，节点只从配置的 GitHub 仓库/代理获取并校验 Release。
 
@@ -332,8 +332,8 @@ proxy:
 ## 管理面板
 
 - 登录：用户名/密码（argon2id 哈希），成功后签发 JWT（HttpOnly + Secure + SameSite Cookie）；登录失败按 IP 限速与锁定；可选 TOTP。
-- 页面：总览（在线节点数 / 独立出口 IP 数 / 活跃连接数 + 趋势 sparkline）、节点、节点组、凭据、连接与规则（粘性黑名单、ACL、强制默认拒绝）、运行设置（调度/粘性/熔断/重试/限流/超时/压缩/默认 ACL 动作）、审计、节点接入（安装脚本 + 节点令牌签发/吊销）。
-- 实时性：SSE 推送 + 3s 轮询兜底。
+- 页面：总览（指标卡 / 趋势 / 证书 / 隧道会话 / TopN / 运行设置）、节点、节点组、凭据、连接与规则（粘性黑名单、ACL、强制默认拒绝）、运行设置（调度/粘性/熔断/重试/限流/超时/压缩/默认 ACL 动作）、审计、证书、归属地、接入（安装脚本 + 节点令牌签发/吊销）。
+- 实时性：SSE 推送 + 3s 轮询兜底；节点摘要含版本、运行时与在线更新状态，更新进度无需切页刷新。
 - 运行设置热生效并持久化到 `runtime-overrides.json`，重启后覆盖配置文件；非法配置被拒绝且保留旧值；支持「撤销上次修改」。
 - 节点拨测：单节点 Ping（隧道 RTT）/ TCPing / HTTP GET / DNS，结果写审计。
 - 审计：登录、配置变更、凭据与组变更、节点上下线、强制下线写入 `runtime-audit.jsonl`，敏感字段脱敏，支持按时间/类型/操作者过滤；面板“强制下线”会同时清除该节点的 takeover 冷却与历史，重连不会被旧冷却拒绝。
@@ -341,7 +341,7 @@ proxy:
 
 ## 节点元数据
 
-- 出口 IP 优先级：节点手工 `egress.manual_v4/v6` > 服务端看到的隧道对端地址 > 节点请求 https IP 回声端点（IPv4/IPv6 分别探测，2s 超时，失败降级）。IP 回声端点只做固定规则提取（纯文本第一个合法 IP / JSON `ip` 字段 / cloudflare trace `ip=` 行），无需配置映射。
+- 节点出口 IP 由节点自行探测：手工 `egress.manual_v4/v6` 优先；未配置时分别请求 `egress.echo_urls_v4/v6`（每个列表按顺序回退，单请求 2s 超时）。服务端不会用隧道对端地址替代节点出口探测；面板里的“来源：对端/stats”只表示首次 HELLO 或周期 STATS 上报，真实探测来源（manual/echo）不单独上报。
 - IPv4/IPv6 会分别记录并同时展示；归属地解析优先使用 IPv4，IPv4 不存在时回退到 IPv6，因此 IPv6-only 节点也能显示国家/城市/ASN。两族都存在时，表格主显示 IPv4、下面显示 IPv6；只有 IPv6 时直接以 IPv6 作为主显示。
 - 「IP 回声」与「归属地查询」是两个独立配置项；归属地查询采用三层 provider，**禁止自动嗅探响应格式**：
   - `preset`：内置适配器 `ipinfo` / `ip-api` / `ipwho.is` / `cloudflare` / 本地 MMDB；`ipinfo` 默认使用新版 `https://api.ipinfo.io/lite/{ip}`（需要 token，返回 `country_code`/`asn`/`as_name`），也兼容旧版 `https://ipinfo.io/{ip}/json` 和 Core `/lookup` 的嵌套响应；
@@ -466,7 +466,7 @@ sudo ./scripts/install-node.sh --server https://gw.example.com:443 \
 11. **透明重试**：仅在向客户端提交响应首字节前重试（HTTP 状态行未写、CONNECT 未回 200、SOCKS5 未回成功），最多按 `settings.scheduler.retry.max_attempts` 换节点；已提交后绝不重试。
 12. **客户端行为参数固定**：心跳/握手/退避/并发内置，配置出现即忽略并告警；`quic_fallback` 作为传输选择参数保留可配（1–5s）。
 13. **测试专用豁免**：内部集成测试需要把回环地址作为代理目标，通过环境变量 `NP_ACL_ALLOW_LOOPBACK_TARGETS=1` 仅在测试中豁免 ACL 强制拒绝清单；生产默认关闭，README 明确标注。
-14. **未实现/降级项**：通用 UDP 中继（非目标，SOCKS5 UDP ASSOCIATE 返回 0x07）、插件系统与 JS 热加载、多租户计费、多服务端共享节点池、面板远程执行、自更新（可选进阶项未实现，README 标注）。ACME 自动签发、qlog/DPLPMTUD 依赖 quic-go 版本能力，若构建环境 API 不支持则以注释与日志标注。
+14. **未实现/降级项**：通用 UDP 中继（非目标，SOCKS5 UDP ASSOCIATE 返回 0x07）、插件系统与 JS 热加载、多租户计费、多服务端共享节点池、面板远程执行。ACME 自动签发、qlog/DPLPMTUD 依赖 quic-go 版本能力，若构建环境 API 不支持则以注释与日志标注。
 15. **quic-go v0.48.2 的能力边界**：该版本公共 API 已移除 `Config.CongestionControl`，因此 `tunnel.quic_cc: bbr` 会被接受但**实际不生效**（默认 CUBIC 由 quic-go 内部决定）；DPLPMTUD 在该版本默认启用、没有独立开关，代码未禁用它；qlog 通过 `QLogDir` 启用。若必须可选 BBR，需要升级 quic-go 并做 API 迁移，本版不为此引入回归风险。
 16. **WebSocket 流 ID 与 epoch**：WS 路径流 ID = `epoch<<20 | seq`；seq 按角色奇偶分配（dialer 奇数、listener 偶数）避免双向同时开流的 ID 碰撞。transport 严格按客户端 HELLO_ACK 中下发的 epoch 过滤迟到帧；在 `SetEpoch` 之前允许任意 epoch（节点在 HELLO_ACK 前已启动 accept 循环，服务端在 ACK 前完成 `SetEpoch`，避免误丢合法首流）。
 17. **WS 半关闭与 CloseRead**：WS 线上协议用 FIN 表示单向半关闭（双向 FIN 后释放）；协议没有「只停读」帧，`CloseRead` 表现为本地丢弃接收并回补窗口，RST 表示整条流异常终止，对端看到 `StreamResetError` 而非 EOF。QUIC 路径分别映射 `Close()`/`CancelRead`/`CancelWrite`。
@@ -533,9 +533,9 @@ go test ./internal/integration/ -v   # 进程内端到端集成测试
 | 节点一直离线 | 服务端 TCP+UDP 443 是否放行 → `server_url` 是否正确 → token 是否吊销 → pin 是否与服务端控制台一致 → 客户端日志 `journalctl -u proxygw-client` |
 | 永远走 wss 不回 QUIC | UDP 443 被丢/被墙 → 客户端日志查看回退原因 → 10 分钟后台重探 → 面板节点传输类型；放在 nginx 后只能 wss（预期） |
 | pin 不匹配硬失败 | 对比错误中的期望/实际指纹；确认服务端证书未更换密钥；轮换期间同时配置新旧两枚 pin |
-| HTTP 返回 407 | 凭据缺失/错误/被禁用/过期/来源 IP 不在白名单 |
+| HTTP 返回 407 | 缺少凭据、用户名/密码错误、凭据被禁用或过期；查看 `Proxy-Authenticate` 与面板凭据状态 |
+| HTTP 返回 403 | 来源 CIDR 不允许、协议不允许、ACL 拒绝、来源 IP 因错误密码被临时封禁，或命中强制默认拒绝清单（回环/私有网段/高风险端口）；查看审计 `proxy.acl_denied` / `proxy.source_banned` |
 | HTTP 返回 503 | 凭据绑定组内无可用节点（fail-closed）或全局无候选；查看节点是否全部离线/熔断；**不会**回退全部节点 |
-| HTTP 返回 403 | ACL 拒绝或命中强制默认拒绝清单（回环/私有网段/高风险端口） |
 | 面板打不开 | 自签证书浏览器告警是预期；确认 443/tcp 放行；`curl -k https://IP/healthz` |
 | 面板登录被锁 | 等待 `admin.login_lock_window` 或重启清空内存限速计数 |
 | 归属地 unknown | 未配置 MMDB 且未开启远程 provider；检查 `geo.remote_consent`、provider 测试按钮的原始响应与路径 |
@@ -553,7 +553,6 @@ go test ./internal/integration/ -v   # 进程内端到端集成测试
 - 不引入数据库与 Redis；运行态数据用 JSON/JSONL 文件持久化。
 - 不做面板内节点远程执行。
 - 单实例模式即可满足需求；多服务端 + 共享节点池（状态外置）明确为非目标。
-- 自更新（校验和验证 + 原子替换 + 失败回滚）为可选进阶项，本版未实现。
 
 ## 许可证
 
