@@ -196,21 +196,32 @@ func TestAuthBanPipelineCountsOnlyCredentialGuesses(t *testing.T) {
 			t.Fatalf("bad auth %d = %+v/%v", i, cred, perr)
 		}
 	}
-	// Missing and malformed headers are countable too.
+	// Missing and malformed headers are audited but are not password guesses:
+	// they must not contribute to the source ban. This prevents a SOCKS5 probe
+	// or a client-side auth-format issue from banning an IP that also uses valid
+	// credentials.
 	if _, perr := p.authenticateHTTP("", ip, model.ProtoHTTP); perr == nil || perr.reason != reasonNoCredential {
 		t.Fatalf("missing credential reason = %+v", perr)
 	}
-	if _, blocked := tracker.Blocked(ip); blocked {
-		t.Fatal("source banned before the configured threshold")
+	for i := 0; i < 20; i++ {
+		if _, perr := p.authenticateHTTP("Digest abc", ip, model.ProtoHTTP); perr == nil {
+			t.Fatal("malformed auth was accepted")
+		}
 	}
-	if _, perr := p.authenticateHTTP("Digest abc", ip, model.ProtoHTTP); perr == nil {
-		t.Fatal("malformed auth was accepted")
+	if _, blocked := tracker.Blocked(ip); blocked {
+		t.Fatal("source banned by missing/malformed authentication alone")
+	}
+	// Two more wrong passwords reach the threshold of four.
+	for i := 0; i < 2; i++ {
+		if cred, perr := p.authenticateHTTP(bad, ip, model.ProtoHTTP); cred != nil || perr == nil {
+			t.Fatalf("bad auth %d = %+v/%v", i, cred, perr)
+		}
 	}
 	if _, blocked := tracker.Blocked(ip); !blocked {
-		t.Fatal("source was not banned after the threshold")
+		t.Fatal("source was not banned after four wrong passwords")
 	}
-	if calls := authn.calls; calls != 2 {
-		t.Fatalf("authenticator calls = %d, want 2 (no credential/malformed must not reach Verify)", calls)
+	if calls := authn.calls; calls != 4 {
+		t.Fatalf("authenticator calls = %d, want 4 (only password guesses reach Verify)", calls)
 	}
 }
 

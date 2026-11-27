@@ -786,11 +786,17 @@ func (p *pipeline) authBanBlocked(sourceIP, protocolName string) *proxyError {
 	return errSourceBanned()
 }
 
-// recordAuthFailure counts one of the countable credential failures. Disabled
-// and expired credentials, source-CIDR rejection and ACL denials are not routed
-// here on purpose.
+// recordAuthFailure counts actual credential guesses for the source-IP ban.
+// Missing/malformed authentication frames are protocol or client-configuration
+// problems, not password guesses: they are audited but never ban the source.
+// Counting them used to ban legitimate clients (for example a SOCKS5 health
+// check or a client that sends an empty username) even when the same IP later
+// used valid credentials.
 func (p *pipeline) recordAuthFailure(sourceIP, protocolName, reason string) {
 	if p.authBan == nil || strings.TrimSpace(sourceIP) == "" {
+		return
+	}
+	if reason == reasonNoCredential || reason == reasonAuthMalformed {
 		return
 	}
 	banned, banFor, failures := p.authBan.RecordFailure(sourceIP, reason)
