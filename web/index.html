@@ -427,7 +427,7 @@
           <h3>代理认证封禁</h3>
           <button type="button" class="btn btn-ghost btn-sm" data-action="auth-bans-refresh">刷新</button>
         </div>
-        <p class="muted small">来源 IP 在窗口内认证失败达到阈值后会被临时封禁；封禁检查发生在密码校验之前。仅统计缺失/格式错误/密码错误的认证失败，凭据禁用/过期不计入。</p>
+        <p class="muted small">来源 IP 在窗口内认证失败达到阈值后会被临时封禁；封禁检查发生在密码校验之前。仅用户名/密码错误计入封禁；缺失凭据、认证格式错误仅写审计不封禁，凭据禁用/过期不计入。</p>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
